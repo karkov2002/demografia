@@ -1,0 +1,8 @@
+[gd_resource type="StyleBoxTexture" format=3]
+
+[ext_resource type="Texture2D" path="res://assets/ui/panel_background.png" id="1_bg"]
+
+[resource]
+texture = ExtResource("1_bg")
+axis_stretch_horizontal = 1
+axis_stretch_vertical = 1
