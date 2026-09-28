@@ -523,7 +523,7 @@ func can_command(player_id: int, cell: Vector2i) -> bool:
 
 
 ## Places qu'offre `to_cell` à la troupe du joueur. Chez lui en paix, c'est la place libre de la case
-## (règle d'or : c'est là que se préparent les armées). Sur une case en guerre (renforts pour la
+## (règle d'or : c'est là que se préparent les armées), dans la limite de rules.max_army pour sa troupe. Sur une case en guerre (renforts pour la
 ## défendre, ou pour rejoindre la bataille, même entre deux autres joueurs) ou sur une case ennemie,
 ## il n'y a pas de limite ; l'excédent éventuel meurt après la bataille (voir starve). Aucune place
 ## sur une case vide en paix : on la colonise avec des colons.
@@ -532,7 +532,9 @@ func army_room(player_id: int, to_cell: Vector2i) -> int:
 	var target_owner := owner(to_cell)
 	if is_at_war(to_cell) or target_owner not in [NO_PLAYER, player_id]:
 		return UNLIMITED
-	return 0 if target_owner == NO_PLAYER else free_room(to_cell)
+	if target_owner == NO_PLAYER:
+		return 0
+	return mini(free_room(to_cell), rules.max_army - population(to_cell).army)
 
 
 ## Cases où peut partir la troupe de `cell`, si elle appartient au joueur : voisines qui sont à lui
@@ -549,15 +551,17 @@ func army_targets(player_id: int, cell: Vector2i) -> Array[Vector2i]:
 
 
 ## La troupe de `from_cell` part pour `to_cell`, dans la limite de la place offerte (le reste attend) :
-## chez le joueur, elle y redevient des fighters (renforts compris, si la case est assiégée) ; ailleurs,
-## elle y livre bataille. Renvoie le nombre de fighters partis.
+## chez le joueur en paix, elle reste une troupe, prête à repartir ; dans une de ses cases assiégées,
+## elle en renforce la garnison ; ailleurs, elle y livre bataille. Renvoie le nombre de fighters partis.
 func send_army(player_id: int, from_cell: Vector2i, to_cell: Vector2i) -> int:
 	if to_cell not in army_targets(player_id, from_cell):
 		return 0
 	var source := population(from_cell)
 	var moved := mini(source.army, army_room(player_id, to_cell))
 	source.army -= moved
-	if owner(to_cell) == player_id:
+	if owner(to_cell) == player_id and not is_at_war(to_cell):
+		population(to_cell).army += moved
+	elif owner(to_cell) == player_id:
 		population(to_cell).counts["fighter"] += moved
 	else:
 		if not _battles.has(to_cell):
@@ -569,10 +573,12 @@ func send_army(player_id: int, from_cell: Vector2i, to_cell: Vector2i) -> int:
 
 ## Pertes du cycle dans chaque bataille, en mêlée générale : chaque camp (le défenseur, propriétaire de
 ## la case, avec toute sa population, et chaque attaquant avec son armée) fait un échange avec chacun
-## des autres, les pertes étant simultanées. Dans un échange avec le défenseur, celui-ci perd un fighter
-## de sa garnison, qui coûte rules.army_per_garrison fighters à l'attaquant ; à défaut un fighter de son
-## armée, ou rules.workers_per_fighter workers, ou rules.scientists_per_fighter scientists, qui en
-## coûtent un. Entre deux attaquants, chacun perd un fighter. Un camp sans combattant quitte la
+## des autres, les pertes étant simultanées (forces prises en début de cycle). Pertes habituelles d'un
+## échange avec le défenseur : celui-ci perd un fighter de sa garnison, qui coûte
+## rules.army_per_garrison fighters à l'attaquant ; à défaut un fighter de son armée, ou
+## rules.workers_per_fighter workers, ou rules.scientists_per_fighter scientists, qui en coûtent un.
+## Entre deux attaquants, chacun perd un fighter. Dans chaque échange, le camp le plus faible voit ses
+## pertes multipliées par le rapport des forces (voir loss_factor). Un camp sans combattant quitte la
 ## bataille (la case d'un défenseur tombé se libère). Quand il ne reste qu'un camp, la bataille prend
 ## fin : le défenseur garde sa case, ou le dernier attaquant la prend, ses survivants y formant la
 ## garnison. Si tous tombent, la case reste libre.
@@ -581,19 +587,32 @@ func _fight_battles() -> void:
 		var current: Battle = _battles[cell]
 		var defenders := population(cell)
 		var attackers := current.fighters.keys()
-		# Pertes de chaque attaquant : un fighter par autre attaquant, plus le prix de son échange avec le défenseur.
+		var strengths := {}
+		for attacker in attackers:
+			strengths[attacker] = attacker_strength(current.fighters[attacker])
+		var defense := defender_strength(cell)
+		# Pertes de chaque attaquant : ses échanges avec les autres attaquants, plus le prix de son
+		# échange avec le défenseur.
 		var losses := {}
 		for attacker in attackers:
-			losses[attacker] = attackers.size() - 1
+			losses[attacker] = 0.0
+			for other in attackers:
+				if other != attacker:
+					losses[attacker] += loss_factor(strengths[attacker], strengths[other])
 			if defenders != null:
-				losses[attacker] += _defender_loses(defenders)
+				var price := _defender_loses(defenders, current, loss_factor(defense, strengths[attacker]))
+				losses[attacker] += price * loss_factor(strengths[attacker], defense)
 		if defenders != null and defenders.is_defenseless():
 			_populations.erase(cell)
 			defenders = null
 		for attacker in attackers:
-			current.fighters[attacker] -= mini(losses[attacker], current.fighters[attacker])
+			var wounds: float = current.wounds.get(attacker, 0.0) + losses[attacker]
+			var dead := mini(floori(wounds + 1e-6), current.fighters[attacker])
+			current.fighters[attacker] -= dead
+			current.wounds[attacker] = wounds - dead
 			if current.fighters[attacker] <= 0:
 				current.fighters.erase(attacker)
+				current.wounds.erase(attacker)
 		var survivors := current.fighters.keys()
 		if survivors.is_empty():
 			_battles.erase(cell)
@@ -604,20 +623,77 @@ func _fight_battles() -> void:
 			_battles.erase(cell)
 
 
-## Pertes du défenseur dans un échange : un fighter de sa garnison, ou à défaut un fighter de son armée,
-## ou rules.workers_per_fighter workers, ou rules.scientists_per_fighter scientists. Renvoie ce que
-## l'échange coûte à l'attaquant : rules.army_per_garrison fighters contre la garnison, qui défend mieux,
-## un sinon, et aucun si le défenseur n'a déjà plus personne.
-func _defender_loses(defenders: Population) -> int:
+## Force d'un camp attaquant de `fighters` fighters.
+func attacker_strength(fighters: int) -> float:
+	return fighters * rules.army_strength
+
+
+## Force du défenseur de `cell` : sa garnison, son armée et ses workers, chacun selon sa force (voir
+## GameRules.garrison_strength), multipliée par defense_bonus(cell). 0 si la case est vide.
+func defender_strength(cell: Vector2i) -> float:
+	var defenders := population(cell)
+	if defenders == null:
+		return 0.0
+	var strength := defenders.whole("fighter") * rules.garrison_strength + defenders.army * rules.army_strength \
+			+ defenders.whole("worker") * rules.worker_strength
+	return strength * defense_bonus(cell)
+
+
+## Multiplicateur de la force du défenseur de `cell` : rules.mountain_defense en montagne, 1 sinon.
+func defense_bonus(cell: Vector2i) -> float:
+	return rules.mountain_defense if terrain(cell) == Terrain.Type.MOUNTAIN else 1.0
+
+
+## Multiplicateur des pertes d'un camp de force `own` face à un camp de force `enemy` : le rapport
+## enemy ÷ own s'il est le plus faible, 1 sinon (le plus fort garde ses pertes habituelles). Une force
+## inférieure à 1 compte pour 1.
+func loss_factor(own: float, enemy: float) -> float:
+	return maxf(1.0, maxf(enemy, 1.0) / maxf(own, 1.0))
+
+
+## Le défenseur subit `exchanges` échanges (fractionnaires, voir loss_factor) : il perd autant de
+## fighters de sa garnison, puis de son armée (les fractions s'accumulent dans `current`), puis
+## rules.workers_per_fighter workers ou rules.scientists_per_fighter scientists par échange restant.
+## Renvoie le prix d'un échange pour l'attaquant : rules.army_per_garrison fighters contre la garnison,
+## qui défend mieux, un sinon, et aucun si le défenseur n'a déjà plus personne.
+func _defender_loses(defenders: Population, current: Battle, exchanges: float) -> int:
 	if defenders.is_defenseless():
 		return 0
-	if defenders.whole("fighter") >= 1:
-		defenders.lose("fighter", 1)
-		return rules.army_per_garrison
-	if defenders.army >= 1:
-		defenders.army -= 1
-	elif defenders.whole("worker") >= 1:
-		defenders.lose("worker", rules.workers_per_fighter)
-	else:
-		defenders.lose("scientist", rules.scientists_per_fighter)
-	return 1
+	var price := rules.army_per_garrison if defenders.whole("fighter") >= 1 else 1
+	var left := _lose_fraction(defenders, "fighter", exchanges, 1.0)
+	var army_left := defenders.army - current.defender_army_wounds
+	if left > 0.0 and army_left > 0.0:
+		var taken := minf(left, army_left)
+		left -= taken
+		current.defender_army_wounds += taken
+		var dead := mini(floori(current.defender_army_wounds + 1e-6), defenders.army)
+		defenders.army -= dead
+		current.defender_army_wounds -= dead
+	left = _lose_fraction(defenders, "worker", left, rules.workers_per_fighter)
+	_lose_fraction(defenders, "scientist", left, rules.scientists_per_fighter)
+	return price
+
+
+## Retire de `role` jusqu'à `exchanges` × `per_exchange` individus (fractions comprises) ; renvoie les
+## échanges qui restent à subir faute d'individus.
+func _lose_fraction(defenders: Population, role: String, exchanges: float, per_exchange: float) -> float:
+	if exchanges <= 0.0:
+		return 0.0
+	var lost := minf(exchanges * per_exchange, defenders.counts[role])
+	defenders.counts[role] -= lost
+	return exchanges - lost / per_exchange
+
+
+## Survivants d'une armée de `army` fighters qui attaque seule une garnison de `garrison` fighters sur
+## `cell` (terrain compris), selon les règles de bataille ; 0 si elle ne l'emporte pas. Sert aux IA à
+## estimer une attaque.
+func assault_survivors(army: int, garrison: int, cell: Vector2i) -> int:
+	var attack := float(army)
+	var defense := float(garrison)
+	var bonus := defense_bonus(cell)
+	while attack >= 1.0 - 1e-6 and defense >= 1.0 - 1e-6:
+		var attack_strength := floorf(attack + 1e-6) * rules.army_strength
+		var defense_strength := floorf(defense + 1e-6) * rules.garrison_strength * bonus
+		defense -= loss_factor(defense_strength, attack_strength)
+		attack -= rules.army_per_garrison * loss_factor(attack_strength, defense_strength)
+	return floori(attack + 1e-6) if defense < 1.0 - 1e-6 else 0

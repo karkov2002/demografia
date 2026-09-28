@@ -1,16 +1,21 @@
 class_name NewGamePopup
 extends ModalPopup
 ## Fenêtre « New game » : taille de la carte, nombre de joueurs et type de chaque joueur (le premier est
-## le joueur local, humain ; les autres sont des IA, un autre joueur humain n'étant pas encore
-## possible). Elle se ferme par la croix en haut à droite, ou par Échap.
+## le joueur local, humain ; les autres sont des IA, pacifiste, normale ou agressive, un autre joueur
+## humain n'étant pas encore possible). Elle se ferme par la croix en haut à droite, ou par Échap.
 
 ## Émis au lancement de la partie, avec les paramètres choisis.
 signal start_requested(setup: GameSetup)
 ## Émis à la fermeture par la croix.
 signal closed
 
-const AI_ITEM := 0
-const HUMAN_ITEM := 1
+## Types proposés pour un joueur : un par niveau d'IA (identifiant = AIProfile.Level), puis humain.
+const AI_ITEMS := {
+	AIProfile.Level.PACIFIST: "IA pacifiste",
+	AIProfile.Level.NORMAL: "IA normale",
+	AIProfile.Level.AGGRESSIVE: "IA agressive",
+}
+const HUMAN_ITEM := 100
 
 var _width: SpinBox
 var _height: SpinBox
@@ -90,19 +95,21 @@ func _rebuild_players() -> void:
 		player_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(player_label)
 		var type := OptionButton.new()
-		type.add_item("IA", AI_ITEM)
+		for level in AI_ITEMS:
+			type.add_item(AI_ITEMS[level], level)
 		type.add_item("Humain", HUMAN_ITEM)
-		type.custom_minimum_size = Vector2(130.0, 0.0)
+		type.custom_minimum_size = Vector2(150.0, 0.0)
+		var human_index := type.get_item_index(HUMAN_ITEM)
 		if index == 0:
 			# Le joueur local : toujours humain.
-			type.select(HUMAN_ITEM)
+			type.select(human_index)
 			type.disabled = true
 			type.tooltip_text = "Vous"
 		else:
 			# Pas encore d'autre joueur humain (il faudra le jeu en ligne) : IA seulement.
-			type.set_item_disabled(HUMAN_ITEM, true)
-			type.set_item_tooltip(HUMAN_ITEM, "Bientôt : un autre joueur humain, en ligne.")
-			type.select(previous[index] if index < previous.size() else AI_ITEM)
+			type.set_item_disabled(human_index, true)
+			type.set_item_tooltip(human_index, "Bientôt : un autre joueur humain, en ligne.")
+			type.select(previous[index] if index < previous.size() else type.get_item_index(AIProfile.Level.NORMAL))
 		row.add_child(type)
 		_players_box.add_child(row)
 		_types.append(type)
@@ -113,8 +120,11 @@ func _on_start_pressed() -> void:
 	setup.columns = int(_width.value)
 	setup.rows = int(_height.value)
 	setup.ai_players.clear()
+	setup.ai_levels.clear()
 	for option in _types:
-		setup.ai_players.append(option.get_selected_id() == AI_ITEM)
+		var id := option.get_selected_id()
+		setup.ai_players.append(id != HUMAN_ITEM)
+		setup.ai_levels.append(AIProfile.Level.NORMAL if id == HUMAN_ITEM else id)
 	start_requested.emit(setup)
 
 

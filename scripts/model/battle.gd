@@ -5,6 +5,11 @@ extends RefCounted
 
 ## Fighters engagés par chaque attaquant ({ joueur: fighters }), sans limite d'effectif.
 var fighters: Dictionary[int, int] = {}
+## Pertes fractionnaires pas encore subies ({ joueur: pertes }), dues au rapport des forces : elles
+## s'accumulent d'un cycle à l'autre et un fighter tombe chaque fois qu'elles atteignent 1.
+var wounds: Dictionary[int, float] = {}
+## Idem pour l'armée du défenseur.
+var defender_army_wounds: float = 0.0
 
 
 func add(player_id: int, count: int) -> void:

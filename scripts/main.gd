@@ -42,10 +42,12 @@ func _ready() -> void:
 	MapGenerator.generate(_world, rng, setup.ai_players.size())
 	# Les joueurs sont créés dans l'ordre choisi, qui fixe leur identifiant et leur couleur ; le
 	# premier humain est le joueur local.
-	for is_ai in setup.ai_players:
+	for index in setup.ai_players.size():
+		var is_ai := setup.ai_players[index]
 		var player := _world.add_player(is_ai, rules.ai_growth_factor if is_ai else 1.0)
 		if is_ai:
-			_ais.append(AIController.new(_world, player.id, rng))
+			var level: int = setup.ai_levels[index] if index < setup.ai_levels.size() else AIProfile.Level.NORMAL
+			_ais.append(AIController.new(_world, player.id, rng, AIProfile.of_level(level)))
 		elif _human == null:
 			_human = player
 	_clock = GameClock.new(rules.cycle_duration)
@@ -151,10 +153,13 @@ func _check_game_over() -> void:
 	popup.menu_requested.connect(_go_to_menu)
 
 
-## « Vous » pour le joueur local, sinon « IA » suivi de sa couleur.
+## « Vous » pour le joueur local, sinon « IA » suivi de sa couleur et de son niveau.
 func _player_name(player: Player) -> String:
 	if player == _human:
 		return "Vous"
+	for ai in _ais:
+		if ai.player_id == player.id:
+			return "IA %s (%s)" % [CellBackground.PLAYER_COLOR_NAMES[player.id], ai.profile.label]
 	return "IA %s" % CellBackground.PLAYER_COLOR_NAMES[player.id]
 
 

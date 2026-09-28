@@ -5,7 +5,7 @@ extends Control
 
 ## Émis au clic sur un bouton « + » ou « - », ou sur les boutons Settler et Army : le joueur veut faire
 ## passer `amount` individus d'un rôle à l'autre. Tant que le bouton reste enfoncé, un individu de plus
-## part après 1 s, puis 1/2 s, 1/3 s, 1/4 s… jusqu'à MAX_HOLD_RATE individus par seconde.
+## part après HOLD_DELAY, puis HOLD_DELAY/2, HOLD_DELAY/3… jusqu'à MAX_HOLD_RATE individus par seconde.
 signal transfer_requested(from_role: String, to_role: String, amount: int)
 ## Émis à chaque clic sur le bouton Boost.
 signal boost_requested
@@ -16,6 +16,8 @@ const ASSIGNABLE_ROLES := ["scientist", "fighter"]
 const WORKFORCE_ROLE := "worker"
 ## Vitesse maximale (individus par seconde) quand un bouton reste enfoncé.
 const MAX_HOLD_RATE := 500.0
+## Délai (s) avant la première répétition d'un bouton maintenu ; les suivantes attendent HOLD_DELAY/n.
+const HOLD_DELAY := 0.4
 ## Hauteur (px) réservée au-dessus de l'hexagone pour la ligne or et food.
 const HEADER_HEIGHT := 32.0
 ## Gros boutons d'action empilés sous l'hexagone : hauteur (px) de chacun et espace entre eux.
@@ -35,6 +37,11 @@ const ACTION_COLORS := {
 	ARMY_ACTION: Color(0.82, 0.26, 0.22),
 	BOOST_ACTION: Color(0.95, 0.6, 0.15),
 }
+## Raccourcis « tout d'un coup » : toute l'armée rejoint la garnison (bouton à droite d'Army), toute la
+## garnison rejoint l'armée (bouton à droite des « - » et « + » de la garnison, dans la limite de
+## rules.max_army).
+const ALL_TO_GARRISON := "all_to_garrison"
+const ALL_TO_ARMY := "all_to_army"
 ## Durée (s) de l'éclat d'un bouton d'action après un clic.
 const FLASH_TIME := 0.15
 ## Couleur du revenu en or de la case.
@@ -83,11 +90,12 @@ var cycle_fraction: float = 0.0:
 
 var _button_rects: Dictionary = {}  # rôle → { signe → zone du bouton + ou - }, au dernier dessin
 var _action_rects: Dictionary = {}  # action → zone de son gros bouton, au dernier dessin
+var _shortcut_rects: Dictionary = {}  # raccourci (ALL_TO_GARRISON, ALL_TO_ARMY) → zone, au dernier dessin
 var _flash: Dictionary = {}  # action → éclat de son bouton, de 1 juste après un clic à 0
 var _held_transfer: Array = []  # [rôle source, rôle cible] tant qu'un bouton est maintenu, sinon vide
 var _hold_time: float = 0.0  # temps écoulé depuis la dernière répétition du bouton maintenu
 var _hold_repeats: int = 0  # répétitions déjà faites depuis le clic
-var _hold_interval: float = 1.0  # délai avant la prochaine répétition
+var _hold_interval: float = HOLD_DELAY  # délai avant la prochaine répétition
 
 
 func _ready() -> void:
@@ -100,6 +108,7 @@ func _draw() -> void:
 	var center := size / 2.0
 	_button_rects = {}
 	_action_rects = {}
+	_shortcut_rects = {}
 	if world == null or cell == HexMap.NO_CELL:
 		_draw_centered_text("Cliquez sur une case", center, 18, hint_color)
 		return
@@ -147,8 +156,9 @@ func _draw() -> void:
 
 ## Rôles d'une case du joueur, en colonne centrée sur `center` : les workers seuls en haut, puis les
 ## scientists et la garnison, chacun avec son icône et, juste en dessous, ses gros boutons « - » et « + »
-## (échange avec les workers). Les rôles qui grandissent ont leur barre de progression. Tous les boutons
-## sont grisés sur une case en guerre, qui est figée.
+## (échange avec les workers) ; la garnison a en plus, à droite, le raccourci ALL_TO_ARMY. Les rôles qui
+## grandissent ont leur barre de progression. Tous les boutons sont grisés sur une case en guerre, qui
+## est figée.
 func _draw_roles(population: Population, center: Vector2, font: Font, font_size: int) -> void:
 	const ROLE_ICONS := {"scientist": Icons.SCIENTIST, "fighter": Icons.GARRISON}
 	var commandable := world.can_command(viewer_id, cell)
@@ -168,7 +178,9 @@ func _draw_roles(population: Population, center: Vector2, font: Font, font_size:
 		if role in ASSIGNABLE_ROLES:
 			var enabled := {"-": commandable and population.can_transfer(role),
 					"+": commandable and population.can_transfer(WORKFORCE_ROLE)}
-			var left := center.x - button_size.x - gap * 0.5
+			# Deux boutons (« - », « + »), plus le raccourci ALL_TO_ARMY pour la garnison, centrés.
+			var count := 3 if role == "fighter" else 2
+			var left := center.x - (count * button_size.x + (count - 1) * gap) / 2.0
 			_button_rects[role] = {}
 			for button_sign in ["-", "+"]:
 				var rect := Rect2(Vector2(left, y + gap * 0.5), button_size)
@@ -176,6 +188,15 @@ func _draw_roles(population: Population, center: Vector2, font: Font, font_size:
 				PopulationText.draw_button(self, font, rect, button_sign, color, text_color)
 				_button_rects[role][button_sign] = rect
 				left += button_size.x + gap
+			if role == "fighter":
+				var rect := Rect2(Vector2(left, y + gap * 0.5), button_size)
+				var can_enlist := commandable and population.can_transfer("fighter") \
+						and population.army < world.rules.max_army
+				var color: Color = ACTION_COLORS[ARMY_ACTION] if can_enlist else PopulationText.DISABLED_COLOR
+				PopulationText.draw_button(self, font, rect, "", color.lerp(Color.WHITE, _flash.get(ALL_TO_ARMY, 0.0) * 0.6),
+						text_color)
+				_draw_icon_in(Icons.SWORD, rect, can_enlist)
+				_shortcut_rects[ALL_TO_ARMY] = rect
 			y += gap * 0.5 + button_size.y
 		y += gap + line_height / 2.0
 
@@ -218,8 +239,8 @@ func _process(delta: float) -> void:
 		_flash[action] = maxf(0.0, _flash[action] - delta / FLASH_TIME)
 	if _held_transfer.is_empty():
 		return
-	# Bouton maintenu : un individu toutes les 1/n secondes (n = rang de la répétition), plafonné à
-	# MAX_HOLD_RATE par seconde. À haute vitesse, plusieurs répétitions tombent dans la même image :
+	# Bouton maintenu : un individu toutes les HOLD_DELAY/n secondes (n = rang de la répétition),
+	# plafonné à MAX_HOLD_RATE par seconde. À haute vitesse, plusieurs répétitions tombent dans la même image :
 	# elles partent en un seul envoi.
 	_hold_time += delta
 	var amount := 0
@@ -227,7 +248,7 @@ func _process(delta: float) -> void:
 		_hold_time -= _hold_interval
 		amount += 1
 		_hold_repeats += 1
-		_hold_interval = maxf(1.0 / (_hold_repeats + 1), 1.0 / MAX_HOLD_RATE)
+		_hold_interval = maxf(HOLD_DELAY / (_hold_repeats + 1), 1.0 / MAX_HOLD_RATE)
 	if amount > 0:
 		transfer_requested.emit(_held_transfer[0], _held_transfer[1], amount)
 
@@ -243,6 +264,11 @@ func _gui_input(event: InputEvent) -> void:
 	for action in _action_rects:
 		if _action_rects[action].has_point(event.position):
 			_press_action(action, event.button_index)
+			accept_event()
+			return
+	for shortcut in _shortcut_rects:
+		if _shortcut_rects[shortcut].has_point(event.position) and event.button_index == MOUSE_BUTTON_LEFT:
+			_press_shortcut(shortcut)
 			accept_event()
 			return
 	for role in _button_rects:
@@ -273,12 +299,29 @@ func _press_action(action: String, mouse_button: int) -> void:
 	_flash[action] = 1.0
 
 
+## Clic sur un raccourci : toute l'armée passe en garnison, ou toute la garnison dans l'armée.
+func _press_shortcut(shortcut: String) -> void:
+	var population := world.population(cell)
+	if shortcut == ALL_TO_GARRISON:
+		transfer_requested.emit(Population.ARMY, "fighter", population.army)
+	else:
+		transfer_requested.emit("fighter", Population.ARMY, population.whole("fighter"))
+	_flash[shortcut] = 1.0
+
+
+## Icône `icon` centrée dans le bouton `rect`, estompée si le bouton est inactif.
+func _draw_icon_in(icon: Texture2D, rect: Rect2, enabled: bool) -> void:
+	var icon_size := Vector2.ONE * rect.size.y * 0.7
+	draw_texture_rect(icon, Rect2(rect.get_center() - icon_size / 2.0, icon_size), false,
+			Color.WHITE if enabled else Color(1.0, 1.0, 1.0, 0.4))
+
+
 ## Premier envoi d'un transfert, qui se répète tant que le bouton reste enfoncé.
 func _start_transfer(transfer: Array) -> void:
 	_held_transfer = transfer
 	_hold_time = 0.0
 	_hold_repeats = 0
-	_hold_interval = 1.0
+	_hold_interval = HOLD_DELAY
 	transfer_requested.emit(transfer[0], transfer[1], 1)
 
 
@@ -316,9 +359,10 @@ func _draw_alerts(center: Vector2, font_size: int) -> void:
 		PopulationText.draw_icon_row(self, get_theme_default_font(), items, center, font_size)
 
 
-## Gros boutons d'action empilés à partir de `top` : Settler et Army (avec leur réserve), puis Boost.
-## Un bouton s'éclaire un instant à chaque clic, et se grise quand il n'a aucun effet possible (tous
-## quand la case est en guerre, car elle est figée).
+## Gros boutons d'action empilés à partir de `top` : Settler et Army (avec leur réserve), puis Boost ;
+## Army est suivi, à sa droite, du raccourci ALL_TO_GARRISON. Un bouton s'éclaire un instant à chaque
+## clic, et se grise quand il n'a aucun effet possible (tous quand la case est en guerre, car elle est
+## figée).
 func _draw_actions(population: Population, top: float, full_radius: float) -> void:
 	var commandable := world.can_command(viewer_id, cell)
 	var can_add_settler := population.can_transfer(WORKFORCE_ROLE) and population.settlers < world.rules.max_settlers
@@ -336,17 +380,30 @@ func _draw_actions(population: Population, top: float, full_radius: float) -> vo
 	var font := get_theme_default_font()
 	for action in ACTIONS:
 		var rect := Rect2(Vector2(size.x / 2.0 - button_size.x / 2.0, top), button_size)
+		if action == ARMY_ACTION:
+			# Le raccourci carré prend sa place à droite, sur la largeur de la ligne.
+			rect.size.x -= ACTION_BUTTON_HEIGHT + ACTION_BUTTON_GAP
+			var shortcut := Rect2(Vector2(rect.end.x + ACTION_BUTTON_GAP, top), Vector2.ONE * ACTION_BUTTON_HEIGHT)
+			var enabled := commandable and population.army > 0
+			_draw_action_box(shortcut, PopulationText.ROLE_COLORS["fighter"] if enabled else PopulationText.DISABLED_COLOR,
+					ALL_TO_GARRISON)
+			_draw_icon_in(Icons.GARRISON, shortcut, enabled)
+			_shortcut_rects[ALL_TO_GARRISON] = shortcut
 		_action_rects[action] = rect
-		var base: Color = ACTION_COLORS[action] if labels[action][2] else PopulationText.DISABLED_COLOR
-		var style := StyleBoxFlat.new()
-		style.bg_color = base.lerp(Color.WHITE, _flash.get(action, 0.0) * 0.6)
-		style.border_color = base.darkened(0.45)
-		style.set_border_width_all(3)
-		style.set_corner_radius_all(10)
-		draw_style_box(style, rect)
+		_draw_action_box(rect, ACTION_COLORS[action] if labels[action][2] else PopulationText.DISABLED_COLOR, action)
 		PopulationText.draw_icon_row(self, font, [[labels[action][0], labels[action][1], Color.WHITE]],
 				rect.get_center(), int(ACTION_BUTTON_HEIGHT * 0.42))
 		top += ACTION_BUTTON_HEIGHT + ACTION_BUTTON_GAP
+
+
+## Fond arrondi d'un gros bouton dans la couleur `base`, éclairci par l'éclat du bouton `flash_key`.
+func _draw_action_box(rect: Rect2, base: Color, flash_key: String) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = base.lerp(Color.WHITE, _flash.get(flash_key, 0.0) * 0.6)
+	style.border_color = base.darkened(0.45)
+	style.set_border_width_all(3)
+	style.set_corner_radius_all(10)
+	draw_style_box(style, rect)
 
 
 ## Échanges de food avec chaque voisine : une grosse flèche hors de l'hexagone, contre le bord qui fait

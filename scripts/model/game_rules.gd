@@ -27,6 +27,15 @@ const FULL_POPULATION := 1024.0
 @export var army_per_garrison: int = 2
 @export var workers_per_fighter: int = 5
 @export var scientists_per_fighter: int = 10
+## Rapport des forces. Force d'un camp : garrison_strength par fighter de garnison, army_strength par
+## fighter d'armée (celle du défenseur comme les fighters des attaquants), worker_strength par worker ;
+## celle d'un défenseur en montagne est multipliée par mountain_defense. Dans chaque échange, le camp le
+## plus faible subit ses pertes habituelles multipliées par (force adverse ÷ sa force) ; le plus fort
+## garde ses pertes habituelles.
+@export var garrison_strength: float = 3.0
+@export var army_strength: float = 2.0
+@export var worker_strength: float = 1.0
+@export var mountain_defense: float = 2.0
 ## Nombre maximal de colons en attente sur une case.
 @export var max_settlers: int = 32
 ## Or rapporté (ou coûté, si négatif) par chaque individu d'un rôle, à chaque cycle.

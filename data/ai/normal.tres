@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="AIProfile" format=3]
+
+[ext_resource type="Script" path="res://scripts/model/ai_profile.gd" id="1_profile"]
+
+[resource]
+script = ExtResource("1_profile")
+label = "normale"
+boost_clicks_per_second = 3.0
+boost_burst_seconds = 4.0
+boost_pause_seconds = 6.0
+settle_fill_ratio = 0.2
+settlers_per_wave = 16
+garrison_ratio = 0.4
+science_ratio = 0.15
+attack_margin = 2.0
+army_commit = 0.6
+attack_delay = 60.0

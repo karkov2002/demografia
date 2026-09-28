@@ -16,3 +16,5 @@ var rows: int = 10
 ## Pour chaque joueur, dans l'ordre (qui fixe aussi son identifiant et sa couleur) : IA ou humain.
 ## Le premier est le joueur local, humain.
 var ai_players: Array[bool] = [false, true]
+## Pour chaque joueur, dans le même ordre : niveau de l'IA (AIProfile.Level), ignoré pour un humain.
+var ai_levels: Array[int] = [AIProfile.Level.NORMAL, AIProfile.Level.NORMAL]
