@@ -6,12 +6,6 @@ extends RefCounted
 ## ajuster garnison et scientists de chaque case, envoyer des colons, puis cliquer sur Boost. Son
 ## caractère (AIProfile) règle chacune de ces étapes.
 
-## Part du budget d'une case (ce que ses workers peuvent nourrir et payer) que l'IA s'autorise à
-## consacrer aux scientists et fighters, pour garder une marge d'or et de food.
-const BUDGET_SHARE := 0.9
-## Workers qu'une case garde toujours, pour continuer à grandir.
-const KEEP_WORKERS := 2
-
 var player_id: int
 var profile: AIProfile
 
@@ -28,6 +22,8 @@ var _watched_seconds: Dictionary[Vector2i, float] = {}
 var _watched_owner: Dictionary[Vector2i, int] = {}
 ## Armée minimale pour vaincre une garnison ({ (garnison, bonus de défense × 100): fighters }).
 var _army_needed: Dictionary[Vector2i, int] = {}
+## Secondes à attendre avant la prochaine action sur la carte (voir profile.action_delay).
+var _action_wait: float = 0.0
 
 
 func _init(world: World, ai_player_id: int, rng: RandomNumberGenerator, ai_profile: AIProfile) -> void:
@@ -55,6 +51,7 @@ func choose_start() -> Command:
 func play_cycle() -> Array[Command]:
 	var commands: Array[Command] = []
 	_busy.clear()
+	_action_wait = maxf(0.0, _action_wait - _world.rules.cycle_duration)
 	_relieve_sieges(commands)
 	_attack(commands)
 	for cell in _peaceful_cells():
@@ -104,57 +101,67 @@ func _support_per_worker() -> float:
 ## que l'IA accepte d'engager.
 func _available_army(cell: Vector2i) -> int:
 	var cell_population := _world.population(cell)
-	var workers := maxi(0, floori(cell_population.whole("worker") * profile.army_commit) - KEEP_WORKERS)
+	var workers := maxi(0, floori(cell_population.whole("worker") * profile.army_commit) - profile.keep_workers)
 	return cell_population.army + cell_population.whole("fighter") + workers
 
 
-## Forme une troupe de `amount` fighters dans `from_cell` (garnison d'abord, puis workers) et l'envoie
-## vers `to_cell`.
+## Action militaire : forme une troupe de `amount` fighters dans `from_cell` (garnison d'abord, puis
+## workers) et l'envoie vers `to_cell`. La suivante devra attendre profile.action_delay (± son aléa),
+## comme un humain qui ne peut mener qu'une action à la fois.
 func _send_army(from_cell: Vector2i, to_cell: Vector2i, amount: int, commands: Array[Command]) -> void:
 	var missing := amount - _world.population(from_cell).army
 	if missing > 0:
 		commands.append(TransferCommand.new(player_id, from_cell, "worker", Population.ARMY, missing))
 	commands.append(SendArmyCommand.new(player_id, from_cell, to_cell))
 	_busy[from_cell] = true
+	_action_wait = profile.action_delay * _jitter(profile.action_delay_jitter)
 
 
 # --- Guerre --------------------------------------------------------------------------------------
 
-## Chaque case assiégée reçoit en renfort de ses voisines de quoi tenir : ses fighters y rejoignent la
-## garnison, jusqu'à ce qu'elle égale à elle seule la force des attaquants (rapport des forces : ce
-## sont alors eux qui perdent le plus).
+## Secours d'une case assiégée, s'il est temps d'agir : elle reçoit de la voisine qui peut en fournir le
+## plus des renforts qui rejoignent sa garnison, jusqu'à ce qu'elle égale à elle seule la force des
+## attaquants (rapport des forces : ce sont alors eux qui perdent le plus). Une seule action à la fois :
+## les autres voisines et les autres cases assiégées attendront les actions suivantes.
 func _relieve_sieges(commands: Array[Command]) -> void:
+	if _action_wait > 0.0:
+		return
 	var rules := _world.rules
 	for cell in _world.cells_of(player_id):
 		if not _world.is_at_war(cell):
 			continue
 		var attack := _world.attacker_strength(_world.battle(cell).total_fighters())
 		var per_fighter := rules.garrison_strength * _world.defense_bonus(cell)
-		var needed := ceili(attack / per_fighter) + 1 - _world.population(cell).whole("fighter")
+		# Les renforts déjà en route comptent.
+		var needed := ceili(attack / per_fighter) + 1 - _world.population(cell).whole("fighter") \
+				- _world.incoming(player_id, cell, true)
+		if needed <= 0:
+			continue
+		var best := World.NO_CELL
 		for neighbor in _world.neighbors(cell):
-			if needed <= 0:
-				break
-			if not _world.can_command(player_id, neighbor) or _busy.has(neighbor):
-				continue
-			var sent := mini(needed, _available_army(neighbor))
-			if sent > 0:
-				_send_army(neighbor, cell, sent, commands)
-				needed -= sent
+			if _world.can_command(player_id, neighbor) and not _busy.has(neighbor) and _available_army(neighbor) > 0 \
+					and (best == World.NO_CELL or _available_army(neighbor) > _available_army(best)):
+				best = neighbor
+		if best != World.NO_CELL:
+			_send_army(best, cell, mini(needed, _available_army(best)), commands)
+			return
 
 
 ## Attaque les cases ennemies voisines, des moins chères aux plus chères, quand une case voisine peut
 ## réunir une armée assez forte. Faute de connaître leur composition, l'IA suppose le pire : toute la
 ## population en garnison (terrain compris). Elle attaque avec la plus petite armée qui l'emporterait
-## sur ce pire cas, multipliée par profile.attack_margin.
+## sur ce pire cas, multipliée par profile.attack_margin. Une seule attaque à la fois, et seulement s'il
+## est temps d'agir (voir profile.action_delay).
 func _attack(commands: Array[Command]) -> void:
 	_watch_enemies()
-	if profile.attack_margin <= 0.0:
+	if profile.attack_margin <= 0.0 or _action_wait > 0.0:
 		return
 	var costs: Dictionary[Vector2i, int] = {}
 	for cell in _peaceful_cells():
 		for neighbor in _world.neighbors(cell):
 			var enemies := _enemy_population(neighbor)
-			if enemies > 0 and not _world.is_at_war(neighbor) \
+			# Une attaque déjà en route vers la case suffit.
+			if enemies > 0 and not _world.is_at_war(neighbor) and _world.incoming(player_id, neighbor, true) == 0 \
 					and _watched_seconds.get(neighbor, 0.0) >= profile.attack_delay:
 				var needed := _army_to_win(enemies, neighbor)
 				if needed > 0:
@@ -170,6 +177,7 @@ func _attack(commands: Array[Command]) -> void:
 				best = neighbor
 		if best != World.NO_CELL:
 			_send_army(best, target, costs[target], commands)
+			return
 
 
 ## Plus petite armée qui l'emporterait sur une garnison de `garrison` fighters dans `cell` (voir
@@ -224,7 +232,7 @@ func _staff(cell: Vector2i, commands: Array[Command]) -> void:
 	var scientists := cell_population.whole("scientist")
 	var people := cell_population.whole("worker") + fighters + scientists
 	# Avec f fighters et s scientists : f + s ≤ k × (people - f - s), soit f + s ≤ k × people / (1 + k).
-	var support := _support_per_worker() * BUDGET_SHARE
+	var support := _support_per_worker() * profile.budget_share
 	var budget := floori(people * support / (1.0 + support))
 	var wanted_scientists := mini(floori(people * profile.science_ratio), budget)
 	var wanted_fighters := mini(ceili(_threat(cell) * profile.garrison_ratio), budget - wanted_scientists)
@@ -242,23 +250,34 @@ func _adjust(cell: Vector2i, role: String, current: int, wanted: int, commands: 
 
 # --- Expansion -----------------------------------------------------------------------------------
 
-## Une case assez peuplée envoie une vague de colons vers la meilleure case libre voisine.
+## Colonisation, s'il est temps d'agir (c'est une action sur la carte, comme une attaque : voir
+## profile.action_delay) : la case la plus remplie parmi celles qui le sont assez envoie une vague de
+## colons vers sa meilleure case libre voisine. Une seule vague à la fois.
 func _colonize(commands: Array[Command]) -> void:
-	var claimed: Dictionary[Vector2i, bool] = {}
+	if _action_wait > 0.0:
+		return
+	var best := World.NO_CELL
+	var best_target := World.NO_CELL
+	var best_fill := 0.0
 	for cell in _peaceful_cells():
-		var cell_population := _world.population(cell)
-		if cell_population.total() < profile.settle_fill_ratio * _world.capacity(cell):
+		var fill := _world.population(cell).total() / _world.capacity(cell)
+		if fill < profile.settle_fill_ratio or fill <= best_fill:
 			continue
-		var target := _best_free_neighbor(cell, claimed)
-		if target == World.NO_CELL:
-			continue
-		var wave := mini(profile.settlers_per_wave, cell_population.whole("worker") - KEEP_WORKERS)
-		var missing := wave - cell_population.settlers
-		if missing > 0:
-			commands.append(TransferCommand.new(player_id, cell, "worker", Population.SETTLER, missing))
-		if cell_population.settlers + maxi(0, missing) > 0:
-			commands.append(SendSettlersCommand.new(player_id, cell, target))
-			claimed[target] = true
+		var target := _best_free_neighbor(cell, {})
+		if target != World.NO_CELL:
+			best = cell
+			best_target = target
+			best_fill = fill
+	if best == World.NO_CELL:
+		return
+	var cell_population := _world.population(best)
+	var wave := mini(profile.settlers_per_wave, cell_population.whole("worker") - profile.keep_workers)
+	var missing := wave - cell_population.settlers
+	if missing > 0:
+		commands.append(TransferCommand.new(player_id, best, "worker", Population.SETTLER, missing))
+	if cell_population.settlers + maxi(0, missing) > 0:
+		commands.append(SendSettlersCommand.new(player_id, best, best_target))
+		_action_wait = profile.action_delay * _jitter(profile.action_delay_jitter)
 
 
 ## Case libre voisine de `cell` la plus intéressante à coloniser : prairie plutôt que montagne, et qui
@@ -268,9 +287,9 @@ func _best_free_neighbor(cell: Vector2i, claimed: Dictionary[Vector2i, bool]) ->
 	var best_score := -INF
 	for neighbor in _world.neighbors(cell):
 		if claimed.has(neighbor) or _world.owner(neighbor) != World.NO_PLAYER or _world.capacity(neighbor) <= 0.0 \
-				or _world.is_at_war(neighbor):
+				or _world.is_at_war(neighbor) or _world.incoming(player_id, neighbor, false) > 0:
 			continue
-		var score := _world.capacity(neighbor) / Terrain.CAPACITY[Terrain.Type.PRAIRIE] + _rng.randf() * 0.05
+		var score := _world.capacity(neighbor) / _world.rules.capacity[Terrain.Type.PRAIRIE] + _rng.randf() * 0.05
 		for around in _world.neighbors(neighbor):
 			if _world.owner(around) == World.NO_PLAYER and _world.capacity(around) > 0.0:
 				score += 0.1
@@ -292,7 +311,7 @@ func _boost(commands: Array[Command]) -> void:
 		_phase_left = _phase_duration()
 	if not _bursting:
 		return
-	var clicks_wanted := profile.boost_clicks_per_second * cycle * _rng.randf_range(0.7, 1.3)
+	var clicks_wanted := profile.boost_clicks_per_second * cycle * _jitter(profile.boost_click_jitter)
 	var clicks := floori(clicks_wanted) + (1 if _rng.randf() < fmod(clicks_wanted, 1.0) else 0)
 	var added: Dictionary[Vector2i, int] = {}
 	for click in clicks:
@@ -314,4 +333,9 @@ func _boost(commands: Array[Command]) -> void:
 ## Durée tirée au hasard de la prochaine rafale ou pause.
 func _phase_duration() -> float:
 	var mean := profile.boost_burst_seconds if _bursting else profile.boost_pause_seconds
-	return mean * _rng.randf_range(0.5, 1.5)
+	return mean * _jitter(profile.boost_phase_jitter)
+
+
+## Facteur tiré au hasard entre 1 - `amount` et 1 + `amount`.
+func _jitter(amount: float) -> float:
+	return _rng.randf_range(1.0 - amount, 1.0 + amount)

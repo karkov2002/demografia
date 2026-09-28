@@ -2,10 +2,6 @@ class_name MapGenerator
 extends RefCounted
 ## Génération du terrain : prairie partout, avec quelques montagnes et étendues d'eau placées au hasard.
 
-## Nombre de cases de la carte pour laquelle rules.mountain_count et rules.water_count sont réglés
-## (10 × 10) ; sur une autre taille, ces nombres suivent la proportion.
-const REFERENCE_CELLS := 100.0
-
 
 ## Place montagnes et eau en gardant au moins `land_needed` cases hors de l'eau (une case de départ
 ## par joueur).
@@ -15,7 +11,7 @@ static func generate(world: World, rng: RandomNumberGenerator, land_needed: int 
 		for column in world.columns:
 			cells.append(Vector2i(column, row))
 	_shuffle(cells, rng)
-	var ratio := cells.size() / REFERENCE_CELLS
+	var ratio := cells.size() / world.rules.map_reference_cells
 	var water := mini(roundi(world.rules.water_count * ratio), maxi(0, cells.size() - land_needed))
 	var mountains := mini(roundi(world.rules.mountain_count * ratio), cells.size() - water)
 	for i in mountains:

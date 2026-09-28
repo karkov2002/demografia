@@ -5,13 +5,14 @@
 [resource]
 script = ExtResource("1_profile")
 label = "agressive"
-boost_clicks_per_second = 5.0
-boost_burst_seconds = 5.0
+boost_clicks_per_second = 4.0
+boost_burst_seconds = 3.0
 boost_pause_seconds = 5.0
-settle_fill_ratio = 0.05
-settlers_per_wave = 8
+settle_fill_ratio = 0.15
+settlers_per_wave = 12
 garrison_ratio = 0.25
 science_ratio = 0.05
 attack_margin = 1.3
 army_commit = 0.8
 attack_delay = 20.0
+action_delay = 3.0

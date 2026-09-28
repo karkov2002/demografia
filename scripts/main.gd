@@ -29,6 +29,7 @@ var _elapsed: float = 0.0
 var _game_over: bool = false
 ## Fenêtre « Retourner au menu ? » ouverte par Échap, ou null.
 var _quit_confirmation: ConfirmPopup
+var _sounds := SoundFx.new()
 
 
 func _ready() -> void:
@@ -44,16 +45,19 @@ func _ready() -> void:
 	# premier humain est le joueur local.
 	for index in setup.ai_players.size():
 		var is_ai := setup.ai_players[index]
-		var player := _world.add_player(is_ai, rules.ai_growth_factor if is_ai else 1.0)
+		var level: int = setup.ai_levels[index] if index < setup.ai_levels.size() else AIProfile.Level.NORMAL
+		var profile := AIProfile.of_level(level) if is_ai else null
+		# Le handicap de croissance d'une IA dépend de son niveau.
+		var player := _world.add_player(is_ai, profile.growth_factor if is_ai else 1.0)
 		if is_ai:
-			var level: int = setup.ai_levels[index] if index < setup.ai_levels.size() else AIProfile.Level.NORMAL
-			_ais.append(AIController.new(_world, player.id, rng, AIProfile.of_level(level)))
+			_ais.append(AIController.new(_world, player.id, rng, profile))
 		elif _human == null:
 			_human = player
 	_clock = GameClock.new(rules.cycle_duration)
 	_clock.cycle.connect(_on_cycle)
 	_starvation_clock = GameClock.new(rules.starvation_interval)
 	_starvation_clock.cycle.connect(_world.starve)
+	_starvation_clock.cycle.connect(func() -> void: _world.move_convoys(rules.starvation_interval))
 
 	_map.viewer_id = _human.id
 	_preview.viewer_id = _human.id
@@ -61,6 +65,9 @@ func _ready() -> void:
 	_preview.world = _world
 	_world.changed.connect(_update_stats)
 	_world.changed.connect(_check_game_over)
+	add_child(_sounds)
+	add_child(BackgroundMusic.new())
+	_world.owner_changed.connect(_on_owner_changed)
 	_update_stats()
 	# Inactif tant qu'aucune case n'est sélectionnée.
 	_start_button.disabled = true
@@ -68,13 +75,15 @@ func _ready() -> void:
 	_start_button.pressed.connect(_on_start_pressed)
 	_preview.transfer_requested.connect(_on_transfer_requested)
 	_map.units_sent.connect(_on_units_sent)
-	_preview.boost_requested.connect(func() -> void: _world.execute(BoostCommand.new(_human.id, _preview.cell)))
+	_preview.boost_requested.connect(_on_boost_requested)
+	_preview.button_clicked.connect(_sounds.click)
 
 
 func _process(delta: float) -> void:
 	_clock.advance(delta)
 	_starvation_clock.advance(delta)
 	_preview.cycle_fraction = _clock.cycle_fraction()
+	_map.convoy_time_offset = _starvation_clock.cycle_fraction() * rules.starvation_interval
 
 
 func _on_cycle() -> void:
@@ -91,6 +100,19 @@ func _on_cell_selected(cell: Vector2i) -> void:
 	# Pas de départ sur l'eau ; une montagne inexplorée reste possible, c'est le jeu.
 	_start_button.disabled = not _world.can_start_at(_human.id, cell)
 	_preview.cell = cell
+	# Bruits de mêlée quand on regarde une bataille en vue.
+	if _world.is_at_war(cell) and _world.is_visible(_human.id, cell):
+		_sounds.battle()
+
+
+## Cris de victoire ou de défaite quand le joueur local gagne ou perd une case par la guerre.
+func _on_owner_changed(_cell: Vector2i, previous_owner: int, new_owner: int, by_war: bool) -> void:
+	if not by_war:
+		return
+	if new_owner == _human.id:
+		_sounds.victory()
+	elif previous_owner == _human.id:
+		_sounds.defeat()
 
 
 ## L'humain choisit sa case en premier, puis chaque IA tire la sienne au hasard.
@@ -107,13 +129,25 @@ func _on_start_pressed() -> void:
 	_history.record(_world, _elapsed)
 
 
+## Boost sur la case du zoom ; s'il a ajouté des workers, un « +N » s'envole du bouton et de la case.
+func _on_boost_requested() -> void:
+	var cell := _preview.cell
+	# Boost ajoute rules.boost_workers workers, dans la limite de la place libre.
+	var added := mini(_world.rules.boost_workers, _world.free_room(cell))
+	if _world.execute(BoostCommand.new(_human.id, cell)):
+		_sounds.laser()
+		_preview.show_boost(added)
+		_map.show_boost(cell, added)
+
+
 func _on_transfer_requested(from_role: String, to_role: String, amount: int) -> void:
 	_world.execute(TransferCommand.new(_human.id, _preview.cell, from_role, to_role, amount))
 
 
 ## Colons et troupe de la case sélectionnée partent vers `to_cell`, chacun là où ses règles le permettent.
 func _on_units_sent(to_cell: Vector2i) -> void:
-	_world.execute(SendSettlersCommand.new(_human.id, _map.selected_cell, to_cell))
+	if _world.execute(SendSettlersCommand.new(_human.id, _map.selected_cell, to_cell)):
+		_sounds.wagon(_world.rules.travel_time)
 	_world.execute(SendArmyCommand.new(_human.id, _map.selected_cell, to_cell))
 
 

@@ -6,6 +6,9 @@ extends RefCounted
 
 ## Émis à chaque changement de population ou de ressources.
 signal changed
+## Émis quand `cell` change de propriétaire (World.NO_PLAYER quand personne) : par la guerre
+## (`by_war`, défenseur tombé ou conquête) ou par la colonisation.
+signal owner_changed(cell: Vector2i, previous_owner: int, new_owner: int, by_war: bool)
 
 const NO_CELL := Vector2i(-1, -1)
 const NO_PLAYER := -1
@@ -25,6 +28,8 @@ var _hunger: Dictionary[Vector2i, float] = {}
 var _overcrowding: Dictionary[Vector2i, float] = {}
 ## Batailles en cours, par case attaquée.
 var _battles: Dictionary[Vector2i, Battle] = {}
+## Colons en route vers une case voisine.
+var _convoys: Array[Convoy] = []
 
 
 func _init(game_rules: GameRules) -> void:
@@ -86,7 +91,7 @@ func set_terrain(cell: Vector2i, type: Terrain.Type) -> void:
 
 
 func capacity(cell: Vector2i) -> float:
-	return Terrain.CAPACITY[terrain(cell)]
+	return rules.capacity.get(terrain(cell), 0.0)
 
 
 func is_inside(cell: Vector2i) -> bool:
@@ -131,14 +136,17 @@ func cells_of(player_id: int) -> Array[Vector2i]:
 	return cells
 
 
-## Population entière du joueur sur toute la carte, tous rôles, colons, troupes et fighters engagés
-## dans ses batailles compris.
+## Population entière du joueur sur toute la carte, tous rôles, colons (en route compris), troupes et
+## fighters engagés dans ses batailles compris.
 func total_population(player_id: int) -> int:
 	var total := 0
 	for cell in cells_of(player_id):
 		total += _populations[cell].whole_total()
 	for current in _battles.values():
 		total += current.fighters.get(player_id, 0)
+	for convoy in _convoys:
+		if convoy.player_id == player_id:
+			total += convoy.units
 	return total
 
 
@@ -166,12 +174,16 @@ func winner() -> int:
 
 
 ## Places libres dans `cell` avant d'atteindre sa capacité (règle d'or) ; les fighters qui y livrent
-## bataille occupent aussi de la place.
+## bataille et ceux qui sont en route vers elle avec une place réservée (voir Convoy) occupent aussi
+## de la place.
 func free_room(cell: Vector2i) -> int:
 	var cell_population := population(cell)
 	var used := 0.0 if cell_population == null else cell_population.total()
 	if _battles.has(cell):
 		used += _battles[cell].total_fighters()
+	for convoy in _convoys:
+		if convoy.to_cell == cell and convoy.reserves_room:
+			used += convoy.units
 	return maxi(0, floori(capacity(cell) - used + 1e-6))
 
 
@@ -482,20 +494,97 @@ func colonization_targets(player_id: int, cell: Vector2i) -> Array[Vector2i]:
 	return result
 
 
-## Les colons de `from_cell` partent pour `to_cell` et y deviennent des workers, dans la limite de sa
-## place libre (le reste attend) ; renvoie le nombre de colons partis.
+## Les colons de `from_cell` partent pour `to_cell`, dans la limite de sa place libre (le reste attend),
+## qu'ils réservent pendant leur trajet (voir move_convoys) ; renvoie le nombre de colons partis.
 func send_settlers(player_id: int, from_cell: Vector2i, to_cell: Vector2i) -> int:
 	if to_cell not in colonization_targets(player_id, from_cell):
 		return 0
 	var source := population(from_cell)
 	var moved := mini(source.settlers, free_room(to_cell))
-	if not _populations.has(to_cell):
-		_populations[to_cell] = Population.new(player_id)
 	source.settlers -= moved
-	_populations[to_cell].counts["worker"] += moved
-	_reveal_around(player_id, to_cell)
+	_convoys.append(Convoy.new(player_id, from_cell, to_cell, moved, false, true))
 	changed.emit()
 	return moved
+
+
+## Colons et troupes en route.
+func convoys() -> Array[Convoy]:
+	return _convoys
+
+
+## Colons (`army` faux) ou fighters (`army` vrai) du joueur en route vers `cell`.
+func incoming(player_id: int, cell: Vector2i, army: bool) -> int:
+	var count := 0
+	for convoy in _convoys:
+		if convoy.player_id == player_id and convoy.to_cell == cell and convoy.is_army == army:
+			count += convoy.units
+	return count
+
+
+## Colons et troupes en route avancent de `seconds` (appelé toutes les rules.starvation_interval
+## secondes) ; au bout de rules.travel_time, ils arrivent (voir _settle et _deploy). Ceux qui ne
+## peuvent pas s'installer rentrent dans leur case de départ, comme colons ou comme troupe, dans la
+## limite de sa place (et de rules.max_settlers ou rules.max_army) ; ceux qui ne peuvent pas rentrer
+## (case de départ perdue, assiégée ou pleine) sont perdus.
+func move_convoys(seconds: float) -> void:
+	var arrived: Array[Convoy] = []
+	for convoy in _convoys:
+		convoy.elapsed += seconds
+		if convoy.elapsed >= rules.travel_time - 1e-6:
+			arrived.append(convoy)
+	for convoy in arrived:
+		_convoys.erase(convoy)
+		var left := _deploy(convoy) if convoy.is_army else _settle(convoy)
+		if left > 0 and can_command(convoy.player_id, convoy.from_cell):
+			var source := population(convoy.from_cell)
+			var limit := rules.max_army - source.army if convoy.is_army else rules.max_settlers - source.settlers
+			var back := mini(left, mini(free_room(convoy.from_cell), limit))
+			if convoy.is_army:
+				source.army += back
+			else:
+				source.settlers += back
+	if not arrived.is_empty():
+		changed.emit()
+
+
+## Colons arrivés : ils deviennent des workers de la case d'arrivée si elle est toujours libre ou au
+## joueur, en paix, dans la limite de sa place (la leur était réservée). Renvoie ceux qui restent.
+func _settle(convoy: Convoy) -> int:
+	var cell := convoy.to_cell
+	if owner(cell) not in [NO_PLAYER, convoy.player_id] or is_at_war(cell):
+		return convoy.units
+	var settled := mini(convoy.units, free_room(cell))
+	if settled > 0:
+		var founded := not _populations.has(cell)
+		if founded:
+			_populations[cell] = Population.new(convoy.player_id)
+		_populations[cell].counts["worker"] += settled
+		_reveal_around(convoy.player_id, cell)
+		if founded:
+			owner_changed.emit(cell, NO_PLAYER, convoy.player_id, false)
+	return convoy.units - settled
+
+
+## Troupe arrivée, selon ce qu'est devenue la case d'arrivée : chez le joueur en paix, elle reste une
+## troupe (dans la limite de la place et de rules.max_army) ; dans une de ses cases assiégées, elle en
+## renforce la garnison ; sur une case ennemie ou en guerre, elle livre bataille. Une case devenue
+## libre et en paix ne l'accueille pas. Renvoie les fighters qui restent.
+func _deploy(convoy: Convoy) -> int:
+	var cell := convoy.to_cell
+	var cell_owner := owner(cell)
+	if cell_owner == convoy.player_id and not is_at_war(cell):
+		var placed := mini(convoy.units, mini(free_room(cell), rules.max_army - population(cell).army))
+		population(cell).army += placed
+		return convoy.units - placed
+	if cell_owner == convoy.player_id:
+		population(cell).counts["fighter"] += convoy.units
+		return 0
+	if cell_owner != NO_PLAYER or is_at_war(cell):
+		if not _battles.has(cell):
+			_battles[cell] = Battle.new()
+		_battles[cell].add(convoy.player_id, convoy.units)
+		return 0
+	return convoy.units
 
 
 # --- Guerre --------------------------------------------------------------------------------------
@@ -534,7 +623,7 @@ func army_room(player_id: int, to_cell: Vector2i) -> int:
 		return UNLIMITED
 	if target_owner == NO_PLAYER:
 		return 0
-	return mini(free_room(to_cell), rules.max_army - population(to_cell).army)
+	return mini(free_room(to_cell), rules.max_army - population(to_cell).army - incoming(player_id, to_cell, true))
 
 
 ## Cases où peut partir la troupe de `cell`, si elle appartient au joueur : voisines qui sont à lui
@@ -550,23 +639,17 @@ func army_targets(player_id: int, cell: Vector2i) -> Array[Vector2i]:
 	return result
 
 
-## La troupe de `from_cell` part pour `to_cell`, dans la limite de la place offerte (le reste attend) :
-## chez le joueur en paix, elle reste une troupe, prête à repartir ; dans une de ses cases assiégées,
-## elle en renforce la garnison ; ailleurs, elle y livre bataille. Renvoie le nombre de fighters partis.
+## La troupe de `from_cell` part pour `to_cell`, dans la limite de la place offerte (le reste attend),
+## et y arrive au bout de rules.travel_time (voir move_convoys et _deploy). Chez le joueur en paix, sa
+## place y est réservée pendant le trajet. Renvoie le nombre de fighters partis.
 func send_army(player_id: int, from_cell: Vector2i, to_cell: Vector2i) -> int:
 	if to_cell not in army_targets(player_id, from_cell):
 		return 0
 	var source := population(from_cell)
 	var moved := mini(source.army, army_room(player_id, to_cell))
 	source.army -= moved
-	if owner(to_cell) == player_id and not is_at_war(to_cell):
-		population(to_cell).army += moved
-	elif owner(to_cell) == player_id:
-		population(to_cell).counts["fighter"] += moved
-	else:
-		if not _battles.has(to_cell):
-			_battles[to_cell] = Battle.new()
-		_battles[to_cell].add(player_id, moved)
+	var reserved := can_command(player_id, to_cell)
+	_convoys.append(Convoy.new(player_id, from_cell, to_cell, moved, true, reserved))
 	changed.emit()
 	return moved
 
@@ -604,6 +687,7 @@ func _fight_battles() -> void:
 				losses[attacker] += price * loss_factor(strengths[attacker], defense)
 		if defenders != null and defenders.is_defenseless():
 			_populations.erase(cell)
+			owner_changed.emit(cell, defenders.owner, NO_PLAYER, true)
 			defenders = null
 		for attacker in attackers:
 			var wounds: float = current.wounds.get(attacker, 0.0) + losses[attacker]
@@ -621,6 +705,7 @@ func _fight_battles() -> void:
 			_populations[cell] = Population.new(winner_id, {"fighter": float(current.fighters[winner_id])})
 			_reveal_around(winner_id, cell)
 			_battles.erase(cell)
+			owner_changed.emit(cell, NO_PLAYER, winner_id, true)
 
 
 ## Force d'un camp attaquant de `fighters` fighters.
@@ -645,10 +730,10 @@ func defense_bonus(cell: Vector2i) -> float:
 
 
 ## Multiplicateur des pertes d'un camp de force `own` face à un camp de force `enemy` : le rapport
-## enemy ÷ own s'il est le plus faible, 1 sinon (le plus fort garde ses pertes habituelles). Une force
-## inférieure à 1 compte pour 1.
+## (enemy ÷ own) ^ rules.force_ratio_exponent s'il est le plus faible, 1 sinon (le plus fort garde ses
+## pertes habituelles). Une force inférieure à 1 compte pour 1.
 func loss_factor(own: float, enemy: float) -> float:
-	return maxf(1.0, maxf(enemy, 1.0) / maxf(own, 1.0))
+	return maxf(1.0, pow(maxf(enemy, 1.0) / maxf(own, 1.0), rules.force_ratio_exponent))
 
 
 ## Le défenseur subit `exchanges` échanges (fractionnaires, voir loss_factor) : il perd autant de

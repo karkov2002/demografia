@@ -14,13 +14,26 @@ const PATHS := {
 
 ## Nom affiché (« pacifiste », « normale », « agressive »).
 @export var label: String = "normale"
+## Handicap de croissance : multiplie l'accroissement de la population de l'IA à chaque cycle (1 = comme
+## un humain).
+@export var growth_factor: float = 0.8
 
 @export_group("Boost")
-## Clics par seconde pendant une rafale sur le bouton Boost.
+## Clics par seconde pendant une rafale sur le bouton Boost, variant au hasard de ± boost_click_jitter.
 @export var boost_clicks_per_second: float = 5.0
-## Durées moyennes (s) d'une rafale de clics et de la pause qui la suit.
+@export_range(0.0, 1.0) var boost_click_jitter: float = 0.3
+## Durées moyennes (s) d'une rafale de clics et de la pause qui la suit, variant au hasard de
+## ± boost_phase_jitter.
 @export var boost_burst_seconds: float = 5.0
 @export var boost_pause_seconds: float = 5.0
+@export_range(0.0, 1.0) var boost_phase_jitter: float = 0.5
+
+@export_group("Économie")
+## Part de ce que les workers d'une case peuvent nourrir et payer que l'IA consacre à ses scientists et
+## à sa garnison (le reste est une marge d'or et de food).
+@export_range(0.0, 1.0) var budget_share: float = 0.9
+## Workers qu'une case garde toujours, pour continuer à grandir (colons et armées ne les prennent pas).
+@export var keep_workers: int = 2
 
 @export_group("Expansion")
 ## Une case envoie des colons quand sa population atteint cette part de sa capacité.
@@ -44,6 +57,14 @@ const PATHS := {
 ## Part des workers d'une case que l'IA accepte d'enrôler pour une attaque ou pour secourir une voisine
 ## assiégée.
 @export_range(0.0, 1.0) var army_commit: float = 0.6
+
+@export_group("Rythme")
+## Temps (s) entre deux actions sur la carte (une attaque, des renforts envoyés d'une case, ou une vague
+## de colons), comme le temps qu'il faut à un humain pour choisir une case, former ses troupes ou ses
+## colons et cliquer sur la cible ; varie au hasard de ± action_delay_jitter. Le Boost a son propre
+## rythme.
+@export var action_delay: float = 3.0
+@export_range(0.0, 1.0) var action_delay_jitter: float = 0.3
 
 
 static func of_level(level: Level) -> AIProfile:

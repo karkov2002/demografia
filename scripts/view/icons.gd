@@ -3,9 +3,53 @@ extends RefCounted
 ## Icônes en pixel art du jeu (générées par res://tools/generate_icons.gd).
 
 const SETTLER := preload("res://assets/icons/settler.png")
+## Images de l'animation du chariot en route (roues qui tournent, caisse qui tressaute).
+const SETTLER_MOVE: Array[Texture2D] = [
+	preload("res://assets/icons/settler_move_0.png"),
+	preload("res://assets/icons/settler_move_1.png"),
+	preload("res://assets/icons/settler_move_2.png"),
+	preload("res://assets/icons/settler_move_3.png"),
+]
+## Événements sur la carte : victoire (trophée), défaite (épée brisée), terre conquise (drapeau).
+const VICTORY := preload("res://assets/icons/victory.png")
+const DEFEAT := preload("res://assets/icons/defeat.png")
+const COLONY := preload("res://assets/icons/colony.png")
+## Images de l'animation du soldat en marche (troupe en route).
+const ARMY_MOVE: Array[Texture2D] = [
+	preload("res://assets/icons/army_move_0.png"),
+	preload("res://assets/icons/army_move_1.png"),
+	preload("res://assets/icons/army_move_2.png"),
+	preload("res://assets/icons/army_move_3.png"),
+]
+## Bataille : épées qui s'entrechoquent, et petite explosion.
+const CLASH: Array[Texture2D] = [
+	preload("res://assets/icons/clash_0.png"),
+	preload("res://assets/icons/clash_1.png"),
+	preload("res://assets/icons/clash_2.png"),
+	preload("res://assets/icons/clash_3.png"),
+]
+const EXPLOSION: Array[Texture2D] = [
+	preload("res://assets/icons/explosion_0.png"),
+	preload("res://assets/icons/explosion_1.png"),
+	preload("res://assets/icons/explosion_2.png"),
+	preload("res://assets/icons/explosion_3.png"),
+]
 ## Ressources de la barre d'action.
 const SCIENCE := preload("res://assets/icons/science.png")
 const POPULATION := preload("res://assets/icons/population.png")
+## Même buste en niveaux de gris, à teinter à la couleur d'un joueur.
+const POPULATION_TINT := preload("res://assets/icons/population_tint.png")
+## Agglomération d'une case selon son remplissage (population totale ÷ capacité) et l'époque, en niveaux
+## de gris à teinter à la couleur de son propriétaire : village jusqu'au premier seuil, ville jusqu'au
+## second, mégapole au-delà. Chaque époque (qui avancera avec la science) aura ses trois images.
+const SETTLEMENTS := {
+	"antiquity": [
+		preload("res://assets/icons/settlement_antiquity_village.png"),
+		preload("res://assets/icons/settlement_antiquity_town.png"),
+		preload("res://assets/icons/settlement_antiquity_megapolis.png"),
+	],
+}
+const SETTLEMENT_THRESHOLDS := [1.0 / 3.0, 2.0 / 3.0]
 const GOLD := preload("res://assets/icons/gold.png")
 const FOOD := preload("res://assets/icons/food.png")
 ## Alerte de famine.
@@ -64,3 +108,19 @@ static func trend(change: float) -> Texture2D:
 	if change < 0.0:
 		return TREND_DOWN
 	return TREND_FLAT
+
+
+## Palier d'agglomération d'une case remplie à `fill` (population totale ÷ capacité, de 0 à 1) :
+## 0 = village, 1 = ville, 2 = mégapole.
+static func settlement_tier(fill: float) -> int:
+	var tier := 0
+	for threshold in SETTLEMENT_THRESHOLDS:
+		if fill >= threshold:
+			tier += 1
+	return tier
+
+
+## Petite icône de l'agglomération (village, ville ou mégapole de l'époque `era`) d'une case remplie à
+## `fill`, pour les lignes d'information (zoom, belligérants).
+static func settlement(fill: float, era: String = "antiquity") -> Texture2D:
+	return SETTLEMENTS[era][settlement_tier(fill)]

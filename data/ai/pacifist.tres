@@ -6,11 +6,12 @@
 script = ExtResource("1_profile")
 label = "pacifiste"
 boost_clicks_per_second = 2.0
-boost_burst_seconds = 3.0
-boost_pause_seconds = 7.0
+boost_burst_seconds = 2.0
+boost_pause_seconds = 8.0
 settle_fill_ratio = 0.3
 settlers_per_wave = 32
 garrison_ratio = 0.75
 science_ratio = 0.4
 attack_margin = 0.0
 army_commit = 0.8
+action_delay = 5.0

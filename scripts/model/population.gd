@@ -96,14 +96,18 @@ func _add(role: String, amount: int) -> void:
 			counts[role] += amount
 
 
-## Applique `rates` (rôle → multiplicateur) sans que le total dépasse `capacity` (règle d'or) :
-## si la place manque, la place restante est partagée au prorata de la croissance de chaque rôle.
+## Croissance logistique (courbe en S) : l'accroissement de chaque rôle donné par `rates` (rôle →
+## multiplicateur dans une case vide) est freiné par la place déjà prise, multiplié par
+## (1 − population totale ÷ `capacity`). Lente au début (peu d'individus), la croissance accélère, puis
+## ralentit à l'approche de la capacité, qu'elle n'atteint qu'en un temps infini. La règle d'or reste
+## garantie : si la place manquait tout de même, elle serait partagée au prorata de la croissance.
 ## Un rôle sans au moins un individu entier ne se reproduit pas.
 func grow(rates: Dictionary[String, float], capacity: float) -> void:
+	var brake := _brake(capacity)
 	var growth: Dictionary[String, float] = {}
 	var total_growth := 0.0
 	for role in counts:
-		growth[role] = counts[role] * (rates.get(role, 1.0) - 1.0) if can_grow(role) else 0.0
+		growth[role] = counts[role] * (rates.get(role, 1.0) - 1.0) * brake if can_grow(role) else 0.0
 		total_growth += growth[role]
 	if total_growth <= 0.0:
 		return
@@ -117,20 +121,27 @@ func grow(rates: Dictionary[String, float], capacity: float) -> void:
 ## Les rôles qui ne se reproduisent jamais (taux ≤ 1) sont absents du résultat ; 0 pour un rôle
 ## bloqué pour l'instant (aucun individu entier, case pleine).
 func progress(rates: Dictionary[String, float], capacity: float, cycle_fraction: float) -> Dictionary[String, float]:
-	var full := total() >= capacity - 1e-6
+	var brake := _brake(capacity)
 	var result: Dictionary[String, float] = {}
 	for role in counts:
 		var rate: float = rates.get(role, 1.0)
 		if rate <= 1.0:
 			continue
-		if full or not can_grow(role):
+		# Multiplicateur réel de ce cycle, freiné par la place prise (courbe en S).
+		var effective := 1.0 + (rate - 1.0) * brake
+		if effective <= 1.0 + 1e-9 or not can_grow(role):
 			result[role] = 0.0
 			continue
 		# Temps écoulé depuis `reached` rapporté au temps pour passer de `reached` à `reached + 1`.
 		var reached := float(whole(role))
-		var current := counts[role] * pow(rate, cycle_fraction)
+		var current := counts[role] * pow(effective, cycle_fraction)
 		result[role] = clampf(log(current / reached) / log((reached + 1.0) / reached), 0.0, 1.0)
 	return result
+
+
+## Frein de la courbe en S : 1 dans une case vide, 0 dans une case pleine.
+func _brake(capacity: float) -> float:
+	return clampf(1.0 - total() / capacity, 0.0, 1.0) if capacity > 0.0 else 0.0
 
 
 ## Il faut au moins un individu entier pour qu'un rôle se reproduise.

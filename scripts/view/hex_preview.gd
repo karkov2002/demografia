@@ -5,19 +5,18 @@ extends Control
 
 ## Émis au clic sur un bouton « + » ou « - », ou sur les boutons Settler et Army : le joueur veut faire
 ## passer `amount` individus d'un rôle à l'autre. Tant que le bouton reste enfoncé, un individu de plus
-## part après HOLD_DELAY, puis HOLD_DELAY/2, HOLD_DELAY/3… jusqu'à MAX_HOLD_RATE individus par seconde.
+## part après rules.hold_delay, puis hold_delay/2, hold_delay/3… jusqu'à rules.max_hold_rate par seconde.
 signal transfer_requested(from_role: String, to_role: String, amount: int)
 ## Émis à chaque clic sur le bouton Boost.
 signal boost_requested
+## Émis à chaque clic sur un autre bouton du zoom (« + », « - », Settler, Army, raccourcis) : pour le
+## bruit du clic.
+signal button_clicked
 
 ## Rôles qu'on peut renforcer (« + ») ou réduire (« - ») en échangeant avec WORKFORCE_ROLE.
 const ASSIGNABLE_ROLES := ["scientist", "fighter"]
 ## Rôle dans lequel on pioche au « + » et auquel on rend au « - ».
 const WORKFORCE_ROLE := "worker"
-## Vitesse maximale (individus par seconde) quand un bouton reste enfoncé.
-const MAX_HOLD_RATE := 500.0
-## Délai (s) avant la première répétition d'un bouton maintenu ; les suivantes attendent HOLD_DELAY/n.
-const HOLD_DELAY := 0.4
 ## Hauteur (px) réservée au-dessus de l'hexagone pour la ligne or et food.
 const HEADER_HEIGHT := 32.0
 ## Gros boutons d'action empilés sous l'hexagone : hauteur (px) de chacun et espace entre eux.
@@ -91,11 +90,12 @@ var cycle_fraction: float = 0.0:
 var _button_rects: Dictionary = {}  # rôle → { signe → zone du bouton + ou - }, au dernier dessin
 var _action_rects: Dictionary = {}  # action → zone de son gros bouton, au dernier dessin
 var _shortcut_rects: Dictionary = {}  # raccourci (ALL_TO_GARRISON, ALL_TO_ARMY) → zone, au dernier dessin
+var _boost_pops: Array = []  # [instant (s), texte] de chaque « +N » qui s'envole du bouton Boost
 var _flash: Dictionary = {}  # action → éclat de son bouton, de 1 juste après un clic à 0
 var _held_transfer: Array = []  # [rôle source, rôle cible] tant qu'un bouton est maintenu, sinon vide
 var _hold_time: float = 0.0  # temps écoulé depuis la dernière répétition du bouton maintenu
 var _hold_repeats: int = 0  # répétitions déjà faites depuis le clic
-var _hold_interval: float = HOLD_DELAY  # délai avant la prochaine répétition
+var _hold_interval: float = 0.0  # délai avant la prochaine répétition
 
 
 func _ready() -> void:
@@ -122,7 +122,8 @@ func _draw() -> void:
 	var block_height := HEADER_HEIGHT + full_radius * 2.0 + actions_height
 	center.y = (size.y - block_height) / 2.0 + HEADER_HEIGHT + full_radius
 	var radius := full_radius * HEX_SCALE
-	CellBackground.draw(self, world, viewer_id, cell, center, radius)
+	# Sans agglomération : les rôles et les commandes du zoom restent lisibles.
+	CellBackground.draw(self, world, viewer_id, cell, center, radius, false)
 	var owner := world.owner(cell)
 	var outline_color := border_color
 	if owner != World.NO_PLAYER and world.is_visible(viewer_id, cell):
@@ -145,8 +146,9 @@ func _draw() -> void:
 			PopulationText.draw(self, font, population, center, font_size, text_color)
 		else:
 			# Case ennemie en vue : sa population totale seulement, sans détail ni commandes.
-			PopulationText.draw_icon_row(self, font,
-					[[Icons.POPULATION, NumberFormat.compact(population.whole_total()), text_color]], center, font_size)
+			var total := population.whole_total()
+			PopulationText.draw_icon_row(self, font, [[Icons.settlement(total / world.capacity(cell)),
+					NumberFormat.compact(total), text_color, CellBackground.PLAYER_COLORS[owner]]], center, font_size, 1.7)
 		return
 	_draw_header(center - Vector2(0.0, full_radius + HEADER_HEIGHT / 2.0), maxi(12, int(radius * 0.13)))
 	_draw_actions(population, center.y + full_radius + ACTION_BUTTON_GAP, full_radius)
@@ -239,8 +241,8 @@ func _process(delta: float) -> void:
 		_flash[action] = maxf(0.0, _flash[action] - delta / FLASH_TIME)
 	if _held_transfer.is_empty():
 		return
-	# Bouton maintenu : un individu toutes les HOLD_DELAY/n secondes (n = rang de la répétition),
-	# plafonné à MAX_HOLD_RATE par seconde. À haute vitesse, plusieurs répétitions tombent dans la même image :
+	# Bouton maintenu : un individu toutes les rules.hold_delay/n secondes (n = rang de la répétition),
+	# plafonné à rules.max_hold_rate par seconde. À haute vitesse, plusieurs répétitions tombent dans la même image :
 	# elles partent en un seul envoi.
 	_hold_time += delta
 	var amount := 0
@@ -248,7 +250,7 @@ func _process(delta: float) -> void:
 		_hold_time -= _hold_interval
 		amount += 1
 		_hold_repeats += 1
-		_hold_interval = maxf(HOLD_DELAY / (_hold_repeats + 1), 1.0 / MAX_HOLD_RATE)
+		_hold_interval = maxf(world.rules.hold_delay / (_hold_repeats + 1), 1.0 / world.rules.max_hold_rate)
 	if amount > 0:
 		transfer_requested.emit(_held_transfer[0], _held_transfer[1], amount)
 
@@ -275,6 +277,7 @@ func _gui_input(event: InputEvent) -> void:
 		for button_sign in _button_rects[role]:
 			if _button_rects[role][button_sign].has_point(event.position) and event.button_index == MOUSE_BUTTON_LEFT:
 				_start_transfer([WORKFORCE_ROLE, role] if button_sign == "+" else [role, WORKFORCE_ROLE])
+				button_clicked.emit()
 				accept_event()
 				return
 
@@ -297,6 +300,32 @@ func _press_action(action: String, mouse_button: int) -> void:
 		_:
 			return
 	_flash[action] = 1.0
+	button_clicked.emit()
+
+
+## « +`amount` » qui s'envole du bouton Boost (clic réussi).
+func show_boost(amount: int) -> void:
+	_boost_pops.append([Time.get_ticks_msec() / 1000.0, "+%d" % amount])
+
+
+## « +N » qui s'envolent du bouton Boost `rect` en grossissant, puis s'effacent en fondu.
+func _draw_boost_pops(rect: Rect2) -> void:
+	const DURATION := 0.7
+	var now := Time.get_ticks_msec() / 1000.0
+	_boost_pops = _boost_pops.filter(func(pop: Array) -> bool: return now - pop[0] < DURATION)
+	var font := get_theme_default_font()
+	for pop in _boost_pops:
+		var t: float = (now - pop[0]) / DURATION
+		# Chaque « +N » part d'un point différent du bouton, selon l'instant du clic.
+		var drift := (fmod(pop[0] * 7.3, 1.0) - 0.5) * rect.size.x * 0.5
+		var center := Vector2(rect.get_center().x + drift, rect.position.y - rect.size.y * 1.3 * t)
+		var font_size := int(ACTION_BUTTON_HEIGHT * (0.5 + 0.3 * t))
+		var alpha := 1.0 - t * t
+		var text: String = pop[1]
+		var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+		var baseline := center + Vector2(-text_size.x / 2.0, font.get_ascent(font_size) - text_size.y / 2.0)
+		draw_string_outline(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, 4, Color(0.2, 0.1, 0.0, alpha))
+		draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(1.0, 0.85, 0.3, alpha))
 
 
 ## Clic sur un raccourci : toute l'armée passe en garnison, ou toute la garnison dans l'armée.
@@ -307,6 +336,7 @@ func _press_shortcut(shortcut: String) -> void:
 	else:
 		transfer_requested.emit("fighter", Population.ARMY, population.whole("fighter"))
 	_flash[shortcut] = 1.0
+	button_clicked.emit()
 
 
 ## Icône `icon` centrée dans le bouton `rect`, estompée si le bouton est inactif.
@@ -321,7 +351,7 @@ func _start_transfer(transfer: Array) -> void:
 	_held_transfer = transfer
 	_hold_time = 0.0
 	_hold_repeats = 0
-	_hold_interval = HOLD_DELAY
+	_hold_interval = world.rules.hold_delay
 	transfer_requested.emit(transfer[0], transfer[1], 1)
 
 
@@ -344,15 +374,16 @@ func _draw_header(center: Vector2, font_size: int) -> void:
 	PopulationText.draw_icon_row(self, get_theme_default_font(), items, center, font_size)
 
 
-## Alertes de la case centrées sur `center` : bataille en cours (les fighters de chaque attaquant, à sa
-## couleur) et famine.
+## Alertes de la case centrées sur `center` : bataille en cours (le défenseur, les épées qui
+## s'entrechoquent, puis les attaquants, chacun à sa couleur ; voir BattleView.belligerents) et famine.
 func _draw_alerts(center: Vector2, font_size: int) -> void:
 	var items := []
-	var battle := world.battle(cell)
-	if battle != null:
-		for attacker in battle.fighters:
-			items.append([Icons.BATTLE, NumberFormat.compact(battle.fighters[attacker]),
-					CellBackground.PLAYER_COLORS[attacker]])
+	if world.is_at_war(cell):
+		var rows := BattleView.belligerents(world, viewer_id, cell)
+		var clash: Texture2D = Icons.CLASH[int(Time.get_ticks_msec() / 1000.0 * BattleView.CLASH_FPS) % Icons.CLASH.size()]
+		items.append_array(rows[0])
+		items.append([clash, "", Color.WHITE])
+		items.append_array(rows[1])
 	if world.owner(cell) == viewer_id and world.is_starving(cell):
 		items.append([Icons.STARVATION, STARVATION_TEXT, STARVATION_COLOR])
 	if not items.is_empty():
@@ -393,6 +424,8 @@ func _draw_actions(population: Population, top: float, full_radius: float) -> vo
 		_draw_action_box(rect, ACTION_COLORS[action] if labels[action][2] else PopulationText.DISABLED_COLOR, action)
 		PopulationText.draw_icon_row(self, font, [[labels[action][0], labels[action][1], Color.WHITE]],
 				rect.get_center(), int(ACTION_BUTTON_HEIGHT * 0.42))
+		if action == BOOST_ACTION:
+			_draw_boost_pops(rect)
 		top += ACTION_BUTTON_HEIGHT + ACTION_BUTTON_GAP
 
 

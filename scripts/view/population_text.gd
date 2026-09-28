@@ -71,10 +71,12 @@ static func draw_outlined(canvas: CanvasItem, font: Font, text: String, baseline
 	canvas.draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
 
 
-## Rangée centrée sur `center` d'éléments [icône, texte, couleur] : chaque icône (null = aucune) est
-## suivie de son texte (vide = aucun), les éléments étant séparés d'un espace.
-static func draw_icon_row(canvas: CanvasItem, font: Font, items: Array, center: Vector2, font_size: int) -> void:
-	var icon_size := Vector2.ONE * font.get_height(font_size) * 1.2
+## Rangée centrée sur `center` d'éléments [icône, texte, couleur] ou [icône, texte, couleur, teinte de
+## l'icône] : chaque icône (null = aucune) est suivie de son texte (vide = aucun), les éléments étant
+## séparés d'un espace. Les icônes font `icon_scale` fois la hauteur du texte.
+static func draw_icon_row(canvas: CanvasItem, font: Font, items: Array, center: Vector2, font_size: int,
+		icon_scale: float = 1.2) -> void:
+	var icon_size := Vector2.ONE * font.get_height(font_size) * icon_scale
 	var gap := font_size * 0.3
 	var item_gap := font_size * 1.0
 	var widths: Array[float] = []
@@ -94,7 +96,8 @@ static func draw_icon_row(canvas: CanvasItem, font: Font, items: Array, center: 
 	for i in items.size():
 		var x := left
 		if items[i][0] != null:
-			canvas.draw_texture_rect(items[i][0], Rect2(Vector2(x, center.y - icon_size.y / 2.0), icon_size), false)
+			var tint: Color = items[i][3] if items[i].size() > 3 else Color.WHITE
+			canvas.draw_texture_rect(items[i][0], Rect2(Vector2(x, center.y - icon_size.y / 2.0), icon_size), false, tint)
 			x += icon_size.x + gap
 		if items[i][1] != "":
 			draw_outlined(canvas, font, items[i][1], Vector2(x, baseline_y), font_size, items[i][2], outline)

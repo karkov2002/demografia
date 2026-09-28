@@ -66,16 +66,63 @@ const STONE_SHADE := Color("7c7c86")
 const STONE_JOINT := Color("8e8e98")
 const DOORWAY := Color("3a2a20")
 
+## Images de l'animation du chariot en route : rayons des roues en « + » puis en « × » (la roue tourne),
+## et caisse qui tressaute d'un pixel vers le haut sur les images 1 et 2.
+const SETTLER_FRAMES := 4
+const SETTLER_BOUNCE := [0, 1, 1, 0]
+## Animations de guerre, en 4 images chacune : soldat en marche (armée en route), épées qui
+## s'entrechoquent et petite explosion (bataille).
+const WAR_FRAMES := 4
+## Épées de la bataille : angle (degrés depuis la verticale) de chacune, de l'écart au choc (étincelle
+## sur l'image 2).
+const CLASH_ANGLES := [10.0, 28.0, 45.0, 28.0]
+const HELMET := Color("b8c0cc")
+const HELMET_SHADE := Color("7e8898")
+const SKIN := Color("f0c090")
+const TUNIC := Color("c83c32")
+const TUNIC_SHADE := Color("962a24")
+const SHIELD := Color("8a5a32")
+const SHIELD_BOSS := Color("d9b24a")
+const BOOT := Color("3a2a20")
+const SPARK := Color("fff7cc")
+const SPARK_EDGE := Color("ffd23f")
+const FIRE_CORE := Color("fff4b0")
+const FIRE := Color("ffb030")
+const FIRE_EDGE := Color("e0502a")
+const SMOKE := Color("6e6a66")
+const SMOKE_LIGHT := Color("9a948e")
+## Icônes en niveaux de gris, teintées au dessin à la couleur d'un joueur (le contour reste sombre).
+const TINT_WALL := Color(1.0, 1.0, 1.0)
+const TINT_SHADE := Color(0.72, 0.72, 0.72)
+const TINT_ROOF := Color(0.5, 0.5, 0.5)
+const TINT_WINDOW := Color(0.22, 0.22, 0.22)
+const TINT_OUTLINE := Color(0.12, 0.12, 0.12)
+
 
 func _init() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT_DIR))
 	_save(_settler(), "settler")
+	for frame in SETTLER_FRAMES:
+		_save(_settler(frame), "settler_move_%d" % frame)
+	_save(_trophy(), "victory")
+	_save(_broken_sword(), "defeat")
+	_save(_flag(), "colony")
+	for frame in WAR_FRAMES:
+		_save(_soldier(frame), "army_move_%d" % frame)
+		_save(_clash(frame), "clash_%d" % frame)
+		_save(_explosion(frame), "explosion_%d" % frame)
 	_save(_gold_trend(Vector2i.UP, ARROW_UP), "gold_up")
 	_save(_gold_trend(Vector2i.RIGHT, ARROW_FLAT), "gold_flat")
 	_save(_gold_trend(Vector2i.DOWN, ARROW_DOWN), "gold_down")
 	_save(_gold(), "gold")
 	_save(_bulb(), "science")
 	_save(_bust(), "population")
+	# Même buste en niveaux de gris, à teinter à la couleur d'un joueur (le contour reste sombre).
+	_save(_bust(Color.WHITE, Color(0.72, 0.72, 0.72), Color(0.12, 0.12, 0.12)), "population_tint")
+	# Agglomérations, par époque (village, ville, mégapole).
+	_save(_antiquity_village(), "settlement_antiquity_village")
+	_save(_antiquity_town(), "settlement_antiquity_town")
+	_save(_antiquity_megapolis(), "settlement_antiquity_megapolis")
 	_save(_apple(), "food")
 	_save(_starvation(), "starvation")
 	_save(_boost(), "boost")
@@ -113,28 +160,37 @@ func _shape(image: Image, inside: Callable, fill: Callable, outline: Color = OUT
 			image.set_pixel(x, y, outline if border else fill.call(x, y))
 
 
-## Chariot bâché : bâche en arche, caisse en bois, deux roues.
-func _settler() -> Image:
+## Chariot bâché : bâche en arche, caisse en bois, deux roues. Avec `frame` (0 à SETTLER_FRAMES - 1),
+## image de l'animation du chariot en route : caisse soulevée de SETTLER_BOUNCE[frame] pixels et rayons
+## des roues visibles, en « + » ou en « × » selon l'image.
+func _settler(frame: int = -1) -> Image:
 	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	var lift: int = 0 if frame < 0 else SETTLER_BOUNCE[frame]
 	# Bâche : demi-ellipse, ombrée à droite, avec deux arceaux.
 	_shape(image,
 			func(x: int, y: int) -> bool:
-				return y <= 8 and pow((x + 0.5 - 8.0) / 6.5, 2) + pow((y + 0.5 - 8.5) / 7.0, 2) <= 1.0,
+				return y + lift <= 8 and pow((x + 0.5 - 8.0) / 6.5, 2) + pow((y + lift + 0.5 - 8.5) / 7.0, 2) <= 1.0,
 			func(x: int, _y: int) -> Color:
 				return CANVAS_SHADE if x >= 11 or x == 5 or x == 8 else CANVAS)
 	# Caisse en bois, barrée d'une planche sombre.
 	_shape(image,
 			func(x: int, y: int) -> bool:
-				return x >= 1 and x <= 14 and y >= 8 and y <= 12,
+				return x >= 1 and x <= 14 and y + lift >= 8 and y + lift <= 12,
 			func(x: int, y: int) -> Color:
-				return WOOD_DARK if y == 10 else WOOD)
-	# Roues avec moyeu clair.
+				return WOOD_DARK if y + lift == 10 else WOOD)
+	# Roues avec moyeu clair et, en route, rayons clairs.
 	for wheel_x in [4.5, 11.5]:
 		_shape(image,
 				func(x: int, y: int) -> bool:
 					return Vector2(x + 0.5, y + 0.5).distance_to(Vector2(wheel_x, 13.5)) <= 2.5,
 				func(x: int, y: int) -> Color:
-					return HUB if Vector2(x + 0.5, y + 0.5).distance_to(Vector2(wheel_x, 13.5)) < 1.0 else WHEEL)
+					var offset := Vector2(x + 0.5, y + 0.5) - Vector2(wheel_x, 13.5)
+					if offset.length() < 1.0:
+						return HUB
+					var straight := absf(offset.x) < 0.1 or absf(offset.y) < 0.1
+					if frame >= 0 and offset.length() < 1.5 and straight == (frame % 2 == 0):
+						return HUB
+					return WHEEL)
 	return image
 
 
@@ -195,21 +251,128 @@ func _bulb() -> Image:
 
 
 ## Buste simplifié : tête ronde posée sur des épaules en arrondi.
-func _bust() -> Image:
+func _bust(fill: Color = BUST, shade: Color = BUST_SHADE, outline: Color = BUST_OUTLINE) -> Image:
 	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
 	_shape(image,
 			func(x: int, y: int) -> bool:
 				return pow((x + 0.5 - 8.0) / 6.5, 2) + pow((y + 0.5 - 16.5) / 7.0, 2) <= 1.0,
 			func(x: int, _y: int) -> Color:
-				return BUST_SHADE if x >= 10 else BUST,
-			BUST_OUTLINE)
+				return shade if x >= 10 else fill,
+			outline)
 	_shape(image,
 			func(x: int, y: int) -> bool:
 				return Vector2(x + 0.5, y + 0.5).distance_to(Vector2(8.0, 5.0)) <= 4.4,
 			func(x: int, _y: int) -> Color:
-				return BUST_SHADE if x >= 9 else BUST,
-			BUST_OUTLINE)
+				return shade if x >= 9 else fill,
+			outline)
 	return image
+
+
+## Village antique : deux huttes rondes à toit de chaume conique, en niveaux de gris à teinter (voir
+## _building).
+func _antiquity_village() -> Image:
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	_hut(image, 4, 3, [1, 2, 3, 4, 4], 3)
+	_hut(image, 12, 7, [1, 2, 3, 4], 3)
+	return image
+
+
+## Hutte ronde centrée entre les colonnes `center - 1` et `center` : toit de chaume à partir de la ligne
+## `top`, dont chaque rangée s'étend de `roof_halves[i]` pixels de part et d'autre (la dernière déborde
+## des murs), puis murs de `wall_half` pixels de part et d'autre jusqu'au bas de l'image, et porte
+## sombre au milieu.
+func _hut(image: Image, center: int, top: int, roof_halves: Array, wall_half: int) -> void:
+	var walls_top: int = top + roof_halves.size()
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				# Distance au milieu : 1 pour les deux colonnes centrales, puis 2, 3…
+				var offset: int = x - center + 1 if x >= center else center - x
+				if y >= top and y < walls_top:
+					return offset <= roof_halves[y - top]
+				return y >= walls_top and y < SIZE and offset <= wall_half,
+			func(x: int, y: int) -> Color:
+				if y < walls_top:
+					return TINT_ROOF
+				if x in [center - 1, center] and y >= SIZE - 3:
+					return TINT_WINDOW
+				return TINT_SHADE if x >= center + wall_half - 1 else TINT_WALL,
+			TINT_OUTLINE)
+
+
+## Ville antique : un temple grec (fronton, colonnes, marches) à côté d'une maison.
+func _antiquity_town() -> Image:
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	_building(image, Rect2i(11, 10, 5, 5), 3, [Vector2i(13, 13), Vector2i(13, 14)])
+	_temple(image, 0, 10, 4)
+	return image
+
+
+## Mégapole antique : cité fortifiée, rempart crénelé percé d'une porte, et derrière lui un grand temple
+## et une tour de guet.
+func _antiquity_megapolis() -> Image:
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	_temple(image, 0, 9, 1)
+	# Tour de guet à deux créneaux, percée d'une fenêtre.
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				return x >= 11 and x <= 14 and (y >= 3 and y <= 10 or y == 2 and x in [11, 14]),
+			func(x: int, y: int) -> Color:
+				if x in [12, 13] and y == 5:
+					return TINT_WINDOW
+				return TINT_SHADE if x == 14 else TINT_WALL,
+			TINT_OUTLINE)
+	# Rempart crénelé, avec sa porte en arc.
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				return y >= 10 and y <= 15 or y == 9 and x % 3 != 2,
+			func(x: int, y: int) -> Color:
+				if x >= 7 and x <= 8 and y >= 12 or y == 12 and x == 6:
+					return TINT_WINDOW
+				return TINT_ROOF if y == 11 else TINT_SHADE,
+			TINT_OUTLINE)
+	return image
+
+
+## Temple grec en niveaux de gris entre les colonnes `left` et `right` : fronton triangulaire au sommet
+## `top`, architrave, colonnes séparées d'ombre, puis deux marches jusqu'au bas de l'image.
+func _temple(image: Image, left: int, right: int, top: int) -> void:
+	var middle := (left + right) / 2.0 + 0.5
+	var half := (right - left + 1) / 2.0
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				if x < left or x > right or y < top:
+					return false
+				var pediment := y < top + 3 and absf(x + 0.5 - middle) <= half * float(y - top + 1) / 3.0 - 0.5
+				return pediment or y >= top + 3,
+			func(x: int, y: int) -> Color:
+				if y < top + 3:
+					return TINT_ROOF
+				if y == top + 3 or y >= SIZE - 2:
+					return TINT_SHADE
+				# Colonnes claires une sur deux, ombre entre elles.
+				return TINT_WALL if (x - left) % 2 == 1 else TINT_WINDOW,
+			TINT_OUTLINE)
+
+
+## Bâtiment en niveaux de gris, à teinter à la couleur d'un joueur : murs `walls` (clairs, ombrés sur la
+## droite), toit à deux pans de `roof` pixels de haut au-dessus (0 = toit plat), fenêtres et portes
+## sombres aux pixels `openings` ; contour sombre commun.
+func _building(image: Image, walls: Rect2i, roof: int, openings: Array[Vector2i]) -> void:
+	var center_x := walls.position.x + walls.size.x / 2.0
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				if walls.has_point(Vector2i(x, y)):
+					return true
+				var height := walls.position.y - y
+				return roof > 0 and height >= 1 and height <= roof \
+						and absf(x + 0.5 - center_x) <= walls.size.x / 2.0 * (1.0 - float(height - 1) / roof),
+			func(x: int, y: int) -> Color:
+				if y < walls.position.y:
+					return TINT_ROOF
+				return TINT_SHADE if x >= walls.end.x - 2 else TINT_WALL,
+			TINT_OUTLINE)
+	for pixel in openings:
+		image.set_pixelv(pixel, TINT_WINDOW)
 
 
 ## Pomme rouge (reflet à gauche, ombre à droite) avec sa queue et une feuille, décalée de `shift`
@@ -414,6 +577,228 @@ func _march() -> Image:
 	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
 	_draw_sword(image, false)
 	_stroke(image, _arrow_pixels(Vector2i.RIGHT, Vector2i(14, 12), 5), ARROW_UP)
+	return image
+
+
+## Soldat en marche vers la droite, image `frame` de l'animation : casque, tunique, bouclier rond,
+## épée levée. Jambes écartées (images 0 et 2, la jambe de derrière changeant de côté) ou serrées
+## (images 1 et 3, le corps se soulève alors d'un pixel).
+func _soldier(frame: int) -> Image:
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	var lift := frame % 2
+	# Jambes, de la hanche au pied.
+	var left_leg: Array[Vector2i] = [Vector2i(7, 11), Vector2i(6, 12), Vector2i(6, 13), Vector2i(5, 14)]
+	var right_leg: Array[Vector2i] = [Vector2i(8, 11), Vector2i(9, 12), Vector2i(9, 13), Vector2i(10, 14)]
+	if lift == 1:
+		left_leg = [Vector2i(7, 10), Vector2i(7, 11), Vector2i(7, 12), Vector2i(7, 13), Vector2i(7, 14)]
+		right_leg = [Vector2i(8, 10), Vector2i(8, 11), Vector2i(8, 12), Vector2i(8, 13), Vector2i(8, 14)]
+	var legs: Array[Vector2i] = []
+	legs.append_array(left_leg)
+	legs.append_array(right_leg)
+	_stroke(image, legs, TUNIC_SHADE)
+	var back_leg := left_leg if frame < 2 else right_leg
+	for pixel in back_leg:
+		image.set_pixelv(pixel, TUNIC_SHADE.darkened(0.35))
+	image.set_pixelv(left_leg[-1], BOOT)
+	image.set_pixelv(right_leg[-1], BOOT)
+	# Casque, visage et tunique ceinturée, d'un seul contour.
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				var row := y + lift
+				var helmet := row <= 3 and pow((x + 0.5 - 8.0) / 2.8, 2) + pow((row + 0.5 - 4.0) / 2.6, 2) <= 1.0
+				var face := x >= 7 and x <= 9 and row >= 4 and row <= 5
+				var tunic := x >= 6 and x <= 10 and row >= 6 and row <= 10
+				return helmet or face or tunic,
+			func(x: int, y: int) -> Color:
+				var row := y + lift
+				if row <= 3:
+					return HELMET_SHADE if x >= 9 else HELMET
+				if row <= 5:
+					return OUTLINE if x == 9 and row == 4 else SKIN
+				if row == 9:
+					return WOOD_DARK
+				return TUNIC_SHADE if x >= 9 else TUNIC)
+	# Bouclier rond à clou doré, sur le flanc gauche.
+	var shield_center := Vector2(5.5, 8.5 - lift)
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				return Vector2(x + 0.5, y + 0.5).distance_to(shield_center) <= 2.6,
+			func(x: int, y: int) -> Color:
+				return SHIELD_BOSS if Vector2(x + 0.5, y + 0.5).distance_to(shield_center) < 1.0 else SHIELD)
+	# Épée levée dans la main droite.
+	var blade: Array[Vector2i] = []
+	for y in range(1, 7):
+		blade.append(Vector2i(12, y - lift))
+	var guard: Array[Vector2i] = [Vector2i(11, 7 - lift), Vector2i(13, 7 - lift)]
+	var hand := Vector2i(12, 7 - lift)
+	var all: Array[Vector2i] = []
+	all.append_array(blade)
+	all.append_array(guard)
+	all.append(hand)
+	_stroke(image, all, BLADE)
+	for pixel in guard:
+		image.set_pixelv(pixel, GUARD)
+	image.set_pixelv(hand, SKIN)
+	return image
+
+
+## Deux épées qui s'entrechoquent, image `frame` de l'animation : elles partent des coins bas et
+## s'inclinent l'une vers l'autre de CLASH_ANGLES[frame] degrés ; étincelle au choc (image 2).
+func _clash(frame: int) -> Image:
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	var angle := deg_to_rad(CLASH_ANGLES[frame])
+	var left_grip := Vector2(3.5, 14.5)
+	var right_grip := Vector2(12.5, 14.5)
+	_draw_swung_sword(image, left_grip, Vector2(sin(angle), -cos(angle)))
+	_draw_swung_sword(image, right_grip, Vector2(-sin(angle), -cos(angle)))
+	if frame == 2:
+		# Point de croisement des deux lames.
+		var reach := (right_grip.x - left_grip.x) / 2.0 / sin(angle)
+		_spark(image, Vector2i(left_grip + Vector2(sin(angle), -cos(angle)) * reach))
+	return image
+
+
+## Épée qui part de la poignée `grip` dans la direction `direction` : poignée, garde en travers, lame
+## de deux pixels (ombrée d'un côté) ; ce qui sort de l'image est coupé.
+func _draw_swung_sword(image: Image, grip: Vector2, direction: Vector2) -> void:
+	var across := direction.orthogonal()
+	var parts := {GRIP: [], GUARD: [], BLADE: [], BLADE_SHADE: []}
+	for step in range(0, 26):
+		var t := step * 0.5
+		var center := grip + direction * t
+		if t < 2.0:
+			parts[GRIP].append(Vector2i(center.floor()))
+		elif t < 2.5:
+			for side in [-1.6, -0.8, 0.0, 0.8, 1.6]:
+				parts[GUARD].append(Vector2i((center + across * side).floor()))
+		else:
+			parts[BLADE].append(Vector2i(center.floor()))
+			parts[BLADE_SHADE].append(Vector2i((center + across * 0.8).floor()))
+	var all: Array[Vector2i] = []
+	for color in parts:
+		for pixel in parts[color]:
+			if pixel not in all and pixel.x >= 0 and pixel.x < SIZE and pixel.y >= 0 and pixel.y < SIZE:
+				all.append(pixel)
+	_stroke(image, all, BLADE)
+	for color in [BLADE_SHADE, GUARD, GRIP]:
+		for pixel in parts[color]:
+			if pixel in all:
+				image.set_pixelv(pixel, color)
+
+
+## Étincelle en étoile centrée sur `center`.
+func _spark(image: Image, center: Vector2i) -> void:
+	var rays: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
+			Vector2i(2, 0), Vector2i(-2, 0), Vector2i(0, 2), Vector2i(0, -2),
+			Vector2i(1, 1), Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1)]
+	for ray in rays:
+		var pixel := center + ray
+		if pixel.x >= 0 and pixel.x < SIZE and pixel.y >= 0 and pixel.y < SIZE:
+			image.set_pixelv(pixel, SPARK_EDGE)
+	image.set_pixelv(center, SPARK)
+
+
+## Petite explosion, image `frame` de l'animation : étincelle, boule de feu, flammes bordées de fumée,
+## puis trois bouffées de fumée. Bords irréguliers, sans contour.
+func _explosion(frame: int) -> Image:
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	const RADII := [2.5, 4.5, 6.2, 6.8]
+	if frame == 3:
+		for puff in [Vector2(5.5, 10.0), Vector2(10.5, 9.0), Vector2(8.0, 5.5)]:
+			for y in SIZE:
+				for x in SIZE:
+					var distance := Vector2(x + 0.5, y + 0.5).distance_to(puff)
+					if distance <= 2.6:
+						image.set_pixel(x, y, SMOKE_LIGHT if distance < 1.5 else SMOKE)
+		return image
+	for y in SIZE:
+		for x in SIZE:
+			var distance := Vector2(x + 0.5, y + 0.5).distance_to(Vector2(8.0, 8.0))
+			var noise := float((x * 7 + y * 13) % 5) / 4.0 - 0.5
+			var reach: float = RADII[frame] + noise
+			if distance > reach:
+				continue
+			var color := Color.TRANSPARENT
+			match frame:
+				0:
+					color = FIRE_CORE if distance < 1.5 else FIRE
+				1:
+					color = FIRE_CORE if distance < 2.0 else (FIRE if distance < 3.5 else FIRE_EDGE)
+				2:
+					color = FIRE if distance < 2.5 else (FIRE_EDGE if distance < 4.5 else SMOKE)
+				3:
+					if (x * 5 + y * 3) % 3 == 0 or distance < 2.0:
+						continue
+					color = SMOKE_LIGHT if (x + y) % 2 == 0 else SMOKE
+			image.set_pixel(x, y, color)
+	return image
+
+
+## Victoire : coupe en or à deux anses, sur un pied et un socle, avec un reflet.
+func _trophy() -> Image:
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				var cup := y >= 1 and y <= 7 and pow((x + 0.5 - 8.0) / 5.0, 2) + pow((y + 0.5 - 1.0) / 7.0, 2) <= 1.0
+				var handles := y >= 2 and y <= 5 and (x == 1 or x == 14) or (y == 2 or y == 5) and (x == 2 or x == 13)
+				var stem := x >= 7 and x <= 8 and y >= 8 and y <= 11
+				var base := x >= 4 and x <= 11 and y >= 12 and y <= 14
+				return cup or handles or stem or base,
+			func(x: int, y: int) -> Color:
+				if x == 5 and y >= 2 and y <= 5:
+					return GOLD_SHINE
+				return GOLD_RIM if x >= 10 or y >= 13 else GOLD,
+			GOLD_OUTLINE)
+	return image
+
+
+## Défaite : épée brisée en deux, la pointe tombée à côté de la garde.
+func _broken_sword() -> Image:
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	var hilt_blade: Array[Vector2i] = []
+	for i in 4:
+		hilt_blade.append(Vector2i(8 - i, 6 + i))
+	var guard: Array[Vector2i] = [Vector2i(2, 8), Vector2i(3, 9), Vector2i(5, 11), Vector2i(6, 12)]
+	var grip: Array[Vector2i] = [Vector2i(3, 11), Vector2i(2, 12), Vector2i(1, 13)]
+	var tip: Array[Vector2i] = []
+	for i in 5:
+		tip.append(Vector2i(10 + i, 13 - i))
+	var all: Array[Vector2i] = []
+	for part in [hilt_blade, guard, grip, tip]:
+		all.append_array(part)
+	_stroke(image, all, BLADE)
+	for pixel in guard:
+		image.set_pixelv(pixel, GUARD)
+	for pixel in grip:
+		image.set_pixelv(pixel, GRIP)
+	# Cassure : éclats sombres au bout de chaque morceau.
+	image.set_pixelv(Vector2i(8, 6), BLADE_SHADE)
+	image.set_pixelv(Vector2i(10, 13), BLADE_SHADE)
+	return image
+
+
+## Terre conquise : drapeau blanc et or planté sur une motte d'herbe.
+func _flag() -> Image:
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	# Motte d'herbe.
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				return y >= 12 and pow((x + 0.5 - 8.0) / 7.0, 2) + pow((y + 0.5 - 15.5) / 3.5, 2) <= 1.0,
+			func(_x: int, y: int) -> Color:
+				return LEAF if y <= 13 else LEAF_DARK,
+			SOIL_OUTLINE)
+	# Mât.
+	var pole: Array[Vector2i] = []
+	for y in range(1, 13):
+		pole.append(Vector2i(4, y))
+	_stroke(image, pole, WOOD, OUTLINE)
+	# Étendard qui flotte, rayé d'or.
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				return x >= 5 and x <= 13 and y >= 1 and y <= 7 - int(x >= 10) and not (x == 13 and y == 4),
+			func(_x: int, y: int) -> Color:
+				return GOLD if y == 4 else CANVAS,
+			OUTLINE)
 	return image
 
 

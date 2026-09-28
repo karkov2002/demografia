@@ -29,6 +29,9 @@ func _ready() -> void:
 	quit.pressed.connect(get_tree().quit)
 	column.add_child(quit)
 	new_game.grab_focus()
+	# Bruit de clic sur les boutons du menu et de la fenêtre « New game », et musique de fond.
+	add_child(SoundFx.new())
+	add_child(BackgroundMusic.new())
 
 
 func _menu_button(text: String) -> Button:

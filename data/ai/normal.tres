@@ -5,9 +5,9 @@
 [resource]
 script = ExtResource("1_profile")
 label = "normale"
-boost_clicks_per_second = 3.0
+boost_clicks_per_second = 2.5
 boost_burst_seconds = 4.0
-boost_pause_seconds = 6.0
+boost_pause_seconds = 8.5
 settle_fill_ratio = 0.2
 settlers_per_wave = 16
 garrison_ratio = 0.4
@@ -15,3 +15,4 @@ science_ratio = 0.15
 attack_margin = 2.0
 army_commit = 0.6
 attack_delay = 60.0
+action_delay = 4.0
