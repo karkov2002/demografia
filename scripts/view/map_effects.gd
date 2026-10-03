@@ -35,9 +35,11 @@ var _effects: Array[Dictionary] = []
 
 
 ## Ajoute un effet `kind` sur `cell`, dans la couleur `color` (onde du flash et de la terre conquise),
-## avec le texte `text` (celui de BOOST, ou un titre qui remplace le titre habituel).
-func add(kind: Kind, cell: Vector2i, color: Color = Color.WHITE, text: String = "") -> void:
-	_effects.append({"kind": kind, "cell": cell, "start": _now(), "color": color, "text": text, "seed": randi()})
+## avec le texte `text` (celui de BOOST, ou un titre qui remplace le titre habituel) et l'image `icon` (à
+## la place du picto habituel).
+func add(kind: Kind, cell: Vector2i, color: Color = Color.WHITE, text: String = "", icon: Texture2D = null) -> void:
+	_effects.append({"kind": kind, "cell": cell, "start": _now(), "color": color, "text": text, "seed": randi(),
+			"icon": icon})
 
 
 func is_empty() -> bool:
@@ -115,6 +117,8 @@ func _draw_event(canvas: CanvasItem, font: Font, center: Vector2, radius: float,
 				Color(label_color, 0.12 * alpha))
 	var icon: Texture2D = {Kind.VICTORY: Icons.VICTORY, Kind.DESTROYED: Icons.VICTORY, Kind.DEFEAT: Icons.DEFEAT,
 			Kind.COLONY: Icons.COLONY, Kind.CITY: Icons.settlement_icon(1), Kind.VILLAGE: Icons.settlement_icon(0)}[kind]
+	if effect.icon != null:
+		icon = effect.icon
 	# Les icônes de la ville et du village, en niveaux de gris, prennent la couleur du joueur.
 	var tint: Color = effect.color if kind in [Kind.CITY, Kind.VILLAGE] else Color.WHITE
 	var wobble := sin(t * 28.0) * 0.3 * (1.0 - t) if kind == Kind.DEFEAT else 0.0

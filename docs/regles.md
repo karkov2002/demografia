@@ -233,6 +233,14 @@ ennemies, dont la population totale est de toute façon affichée. Le maximum 0,
 - **Flèche « up ».** Sur chaque village plein du joueur qui peut passer en ville, une petite flèche
   dorée sautille et luit en haut à droite de la case.
 
+**Zoom d'une case ennemie.** Il montre le **portrait du dirigeant** propriétaire (cerné de sa couleur)
+au-dessus de la population de la case, et son nom en dessous, pour voir d'un coup d'œil à qui elle
+appartient (silhouette « Unknown » s'il n'a pas encore été rencontré). Sans en-tête ni boutons, l'hexagone
+y prend toute la place.
+
+**Flèches de food du zoom.** Chaque flèche d'échange tient dans la marge autour de l'hexagone : son texte
+(13 px) rétrécit si besoin, jusqu'à 8 px, pour ne jamais déborder sur l'en-tête ni sur les boutons.
+
 **Sélection.** Un clic gauche sur une case la sélectionne et l'affiche dans le zoom (ou, sur une case
 cible, y envoie les colons et l'armée de la case sélectionnée). Un **clic droit** sur la carte
 désélectionne la case : le zoom revient à « Click on a cell ».
@@ -258,7 +266,11 @@ désélectionne la case : le zoom revient à « Click on a cell ».
   Les villes n'en ont pas : on voit d'un coup d'œil les zones agricoles autour des villes.
 - **Fortifications.** Chaque case du joueur qui a une **garnison** est fortifiée le long de ses
   frontières : une **palissade** de pieux appointés, puis un **mur de pierre** crénelé à partir de
-  100 fighters en garnison (`WALL_STONE_GARRISON`). Comme les frontières, il n'y a pas de mur entre
+  100 fighters en garnison (`WALL_STONE_GARRISON`). Les fortifications **montent avec la garnison**, sur
+  une échelle logarithmique pour que les premiers renforts se voient : la palissade passe de pieux à
+  peine sortis de terre (1 fighter) à une haute palissade (99) ; le mur de pierre, d'un muret crénelé
+  (100) à un haut rempart aux assises visibles (1000, `WALL_FULL_STONE`). Hauteurs : `STAKE_HEIGHT` et
+  `STONE_HEIGHT`. Comme les frontières, il n'y a pas de mur entre
   deux cases du joueur : les fortifications forment une grande muraille autour de sa civilisation, et
   une case sans garnison y fait un **trou** bien visible, qui montre la zone non protégée. Les cases
   ennemies en vue montrent aussi leurs fortifications : on voit donc où l'ennemi a une garnison (et si
@@ -305,8 +317,12 @@ audio principal qui est rendu muet, donc le réglage tient au retour au menu et 
 suivantes.
 
 **Liste des joueurs.** Sous la barre des ressources, la colonne de droite liste tous les joueurs, un
-par ligne : couleur, nom, puis la **part du territoire** : cases possédées ÷ cases habitables de la
-carte (hors eau), en %. Tant qu'on n'a pas **rencontré** un joueur, sa part reste « ? ». On le
+par ligne : couleur, portrait, nom, puis trois colonnes : la **part du territoire** (cases possédées ÷
+cases habitables de la carte, hors eau, en %), la **population totale** et l'**ère** de sa civilisation
+(pour l'instant « Antiquity » pour tous ; elle avancera avec la science, `Player.era`). Tant qu'on n'a pas
+**rencontré** un joueur, seule sa couleur est connue : portrait de silhouette marqué « ? », nom
+« Unknown » et « ? » dans les trois colonnes ; même sa destruction est annoncée anonymement (« An
+unknown civilization has been destroyed »). La fenêtre de fin révèle tous les joueurs. On le
 rencontre dès qu'on voit une de ses cases (en arrivant à son contact), et il reste connu ensuite,
 même perdu de vue (`Player.has_met`, `World.update_contacts`). Un joueur détruit est marqué
 « destroyed ». D'autres informations s'y ajouteront avec les technologies.
@@ -326,6 +342,24 @@ côte. Les réglages `FRONTIER_WIDTH`, `NEON_GLOW_LAYERS` et `NEON_PULSE_RATE` s
 **Joueurs IA.** Une IA joue avec les mêmes commandes et les mêmes règles qu'un humain : elle colonise,
 défend, attaque et clique sur Boost selon son niveau (voir §9). Sa croissance est ralentie par le
 `growth_factor` de son profil (voir §3).
+
+**Dirigeants des IA (depuis le 03/10).** Chaque IA est dirigée par une personnalité célèbre, tirée au
+hasard selon son niveau, sans doublon dans une partie (`scripts/model/leaders.gd`) :
+- **agressives** : Alexander the Great, Julius Caesar, Attila, Genghis Khan, Ivan the Terrible,
+  Napoleon, Mao Zedong ;
+- **normales** : Augustus, Charlemagne, Elizabeth I, Louis XIV, Abraham Lincoln, Tang Taizong,
+  Winston Churchill ;
+- **pacifistes** : Gandhi, Martin Luther King Jr., Nelson Mandela, the 14th Dalai Lama, Saint Louis,
+  Marcus Aurelius, Confucius.
+
+Le joueur IA porte le nom de son dirigeant suivi de son niveau, par exemple « Genghis Khan
+(aggressive) », dans la liste des joueurs, la fenêtre de fin et l'annonce « … has been destroyed ».
+Chaque dirigeant a un **portrait en pixel art** (32×32, `assets/portraits/`, généré par
+`tools/generate_portraits.gd`) construit sur ses traits reconnaissables : bicorne de Napoléon,
+haut-de-forme et collier de barbe de Lincoln, lunettes rondes de Gandhi, cigare de Churchill, fraise
+d'Élisabeth, perruque de Louis XIV, couronne et barbe blanche de Charlemagne, etc. Le portrait apparaît
+dans la liste des joueurs, la légende de la fenêtre de fin et l'annonce de destruction (à la place du
+trophée).
 
 ---
 

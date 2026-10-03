@@ -66,12 +66,16 @@ const FOOD_IMPORT_COLOR := Color(0.45, 0.95, 0.35)
 const FOOD_EXPORT_COLOR := Color(1.0, 0.55, 0.35)
 const FOOD_ARROW_PADDING := 5.0
 const FOOD_ARROW_GAP := 3.0
-## Taille fixe du texte des flèches, pour qu'il reste lisible même quand l'hexagone est petit.
-const FOOD_ARROW_FONT_SIZE := 14
+## Taille du texte des flèches : FOOD_ARROW_FONT_SIZE, réduite si besoin pour que la flèche tienne dans la
+## marge autour de l'hexagone, jusqu'à FOOD_ARROW_MIN_FONT_SIZE.
+const FOOD_ARROW_FONT_SIZE := 13
+const FOOD_ARROW_MIN_FONT_SIZE := 8
 ## Couleur du solde de food de la case.
 const FOOD_TEXT_COLOR := Color(1.0, 0.55, 0.5)
 ## Taille de l'hexagone par rapport à la place disponible : la marge accueille les échanges de food.
 const HEX_SCALE := 0.64
+## Taille du portrait du propriétaire d'une case ennemie, en rayons de l'hexagone.
+const PORTRAIT_SCALE := 0.5
 ## Alertes affichées dans l'hexagone : famine, bataille.
 const STARVATION_TEXT := "ZOOM_STARVATION"
 const STARVATION_COLOR := Color(1.0, 0.35, 0.3)
@@ -132,10 +136,13 @@ func _draw() -> void:
 	# Place réservée au-dessus de l'hexagone (or et food) et en dessous (boutons d'action), le tout
 	# centré verticalement ; l'hexagone est ensuite réduit pour laisser, tout autour, la place aux
 	# échanges de food posés sur ses bords.
-	var actions_height := ACTIONS.size() * (ACTION_BUTTON_HEIGHT + ACTION_BUTTON_GAP) + ACTION_BUTTON_GAP
-	var full_radius := maxf(0.0, minf(available.x / sqrt(3.0), (available.y - HEADER_HEIGHT - actions_height) / 2.0))
-	var block_height := HEADER_HEIGHT + full_radius * 2.0 + actions_height
-	center.y = (size.y - block_height) / 2.0 + HEADER_HEIGHT + full_radius
+	# Une case qui n'est pas au joueur n'a ni en-tête ni boutons : l'hexagone prend toute la place.
+	var commanded := world.owner(cell) == viewer_id and world.is_visible(viewer_id, cell)
+	var header_height := HEADER_HEIGHT if commanded else 0.0
+	var actions_height := ACTIONS.size() * (ACTION_BUTTON_HEIGHT + ACTION_BUTTON_GAP) + ACTION_BUTTON_GAP if commanded else 0.0
+	var full_radius := maxf(0.0, minf(available.x / sqrt(3.0), (available.y - header_height - actions_height) / 2.0))
+	var block_height := header_height + full_radius * 2.0 + actions_height
+	center.y = (size.y - block_height) / 2.0 + header_height + full_radius
 	var radius := full_radius * HEX_SCALE
 	# Sans agglomération : les rôles et les commandes du zoom restent lisibles.
 	CellBackground.draw(self, world, viewer_id, cell, center, radius, false)
@@ -150,11 +157,13 @@ func _draw() -> void:
 	var font := get_theme_default_font()
 	var font_size := maxi(12, int(radius * 0.12))
 	# Une case en guerre dont le défenseur est tombé n'a plus de population, mais la bataille continue.
-	# Sur une case du joueur, les alertes montent en haut de l'hexagone pour laisser place aux rôles.
-	_draw_alerts(center - Vector2(0.0, radius * (0.75 if owner == viewer_id else 0.5)), font_size)
+	# Les alertes vont en haut de l'hexagone pour laisser place aux rôles (case du joueur) ou au portrait du
+	# propriétaire (case ennemie).
+	_draw_alerts(center - Vector2(0.0, radius * 0.75), font_size)
 	if population == null:
 		return
 	if owner != viewer_id:
+		_draw_owner(owner, center, radius, font, font_size)
 		var battle := world.battle(cell)
 		if battle != null and battle.fighters.has(viewer_id):
 			# Case assiégée par le joueur : la bataille révèle le détail de ses défenseurs.
@@ -167,8 +176,26 @@ func _draw() -> void:
 		return
 	_draw_header(center - Vector2(0.0, full_radius + HEADER_HEIGHT / 2.0), maxi(12, int(radius * 0.13)))
 	_draw_actions(population, center.y + full_radius + ACTION_BUTTON_GAP, full_radius)
-	_draw_food_flows(center, radius)
+	_draw_food_flows(center, radius, full_radius)
 	_draw_roles(population, center, radius, font, font_size)
+
+
+## Propriétaire d'une case ennemie : le portrait de son dirigeant au-dessus du centre de l'hexagone, cerné
+## de sa couleur, et son nom en dessous de la population.
+func _draw_owner(owner: int, center: Vector2, radius: float, font: Font, font_size: int) -> void:
+	var owner_player := world.player(owner)
+	var met := world.player(viewer_id).has_met(owner)
+	var known := met and owner_player.leader != ""
+	var portrait := Leaders.portrait(owner_player.leader) if known else Leaders.unknown_portrait()
+	var portrait_size := Vector2.ONE * radius * PORTRAIT_SCALE
+	var portrait_center := center - Vector2(0.0, radius * 0.42)
+	var frame := Rect2(portrait_center - portrait_size / 2.0, portrait_size)
+	draw_rect(frame.grow(3.0), CellBackground.PLAYER_COLORS[owner])
+	draw_rect(frame, Color(0.0, 0.0, 0.0, 0.35))
+	draw_texture_rect(portrait, frame, false)
+	var owner_name := Leaders.display_name(owner_player.leader) if known else Locale.text("PLAYER_LIST_UNKNOWN_NAME")
+	PopulationText.draw_outlined_centered(self, font, owner_name, center + Vector2(0.0, radius * 0.42), font_size,
+			CellBackground.PLAYER_COLORS[owner].lightened(0.35))
 
 
 ## Rôles d'une case du joueur, en colonne centrée sur `center` : les workers seuls en haut, puis les
@@ -497,7 +524,7 @@ func _draw_action_box(rect: Rect2, base: Color, flash_key: String) -> void:
 ## Échanges de food avec chaque voisine : une grosse flèche hors de l'hexagone, contre le bord qui fait
 ## face à la voisine. Sortante (elle part du bord) pour un export, entrante (sa pointe touche le bord)
 ## pour un import ; son corps porte une pomme et la quantité nette par cycle.
-func _draw_food_flows(center: Vector2, radius: float) -> void:
+func _draw_food_flows(center: Vector2, radius: float, full_radius: float) -> void:
 	var exports := world.food_exports(cell)
 	var imports := world.food_imports(cell)
 	# Distance du centre au milieu d'un bord.
@@ -508,21 +535,34 @@ func _draw_food_flows(center: Vector2, radius: float) -> void:
 			continue
 		var direction := HexUtils.neighbor_direction(cell, neighbor)
 		var text := NumberFormat.signed(net)
-		_draw_food_arrow(center + direction * edge_distance, direction, net > 0.0, text, FOOD_ARROW_FONT_SIZE)
+		# Chaque flèche tient dans la marge autour de l'hexagone, sans déborder sur l'en-tête ni les boutons.
+		_draw_food_arrow(center + direction * edge_distance, direction, net > 0.0, text, full_radius - edge_distance)
 
 
 ## Grosse flèche dans l'axe `direction`, collée au point `edge` du bord : pointe vers l'extérieur
 ## (sortante) ou, si `incoming`, pointe sur le bord (entrante). Son corps, dimensionné pour son
-## contenu, porte la pomme au-dessus de `text`, toujours à l'horizontale.
-func _draw_food_arrow(edge: Vector2, direction: Vector2, incoming: bool, text: String, font_size: int) -> void:
+## contenu, porte la pomme au-dessus de `text`, toujours à l'horizontale ; la flèche entière ne dépasse pas
+## `max_length` depuis le bord.
+func _draw_food_arrow(edge: Vector2, direction: Vector2, incoming: bool, text: String, max_length: float) -> void:
 	var font := get_theme_default_font()
-	var icon_size := font.get_height(font_size)
-	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
-	var content := Vector2(maxf(icon_size, text_size.x), icon_size + text_size.y) + Vector2.ONE * FOOD_ARROW_PADDING
-	# Encombrement du contenu dans l'axe de la flèche (longueur du corps) et en travers (largeur).
-	var body_length := absf(direction.x) * content.x + absf(direction.y) * content.y
-	var body_width := absf(direction.y) * content.x + absf(direction.x) * content.y
-	var head_length := body_width * 0.4
+	var font_size := FOOD_ARROW_FONT_SIZE
+	var icon_size := 0.0
+	var text_size := Vector2.ZERO
+	var body_length := 0.0
+	var body_width := 0.0
+	var head_length := 0.0
+	# Texte réduit jusqu'à ce que la flèche tienne dans `max_length` (sans descendre sous FOOD_ARROW_MIN_FONT_SIZE).
+	while true:
+		icon_size = font.get_height(font_size)
+		text_size = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+		var content := Vector2(maxf(icon_size, text_size.x), icon_size + text_size.y) + Vector2.ONE * FOOD_ARROW_PADDING
+		# Encombrement du contenu dans l'axe de la flèche (longueur du corps) et en travers (largeur).
+		body_length = absf(direction.x) * content.x + absf(direction.y) * content.y
+		body_width = absf(direction.y) * content.x + absf(direction.x) * content.y
+		head_length = body_width * 0.4
+		if FOOD_ARROW_GAP + body_length + head_length <= max_length or font_size <= FOOD_ARROW_MIN_FONT_SIZE:
+			break
+		font_size -= 1
 	var head_width := body_width * 1.3
 	# Coordonnées le long de la flèche, depuis le bord : corps puis pointe, ou pointe puis corps.
 	var start := FOOD_ARROW_GAP

@@ -55,6 +55,9 @@ func _ready() -> void:
 		# Le handicap de croissance d'une IA dépend de son niveau.
 		var player := _world.add_player(is_ai, profile.growth_factor if is_ai else 1.0)
 		if is_ai:
+			# Chaque IA est dirigée par une personnalité célèbre de son niveau, sans doublon.
+			var taken := _world.players.map(func(other: Player) -> String: return other.leader)
+			player.leader = Leaders.pick(level, rng, taken)
 			_ais.append(AIController.new(_world, player.id, rng, profile))
 		elif _human == null:
 			_human = player
@@ -200,16 +203,25 @@ func _update_stats() -> void:
 	_food_stat.trend = food
 
 
-## Annonce chaque joueur ennemi qui vient d'être détruit (plus personne nulle part) : « Player #N has been
-## destroyed » en grand sur la carte, avec feux d'artifice et clameur de victoire.
+## Annonce chaque joueur ennemi qui vient d'être détruit (plus personne nulle part) : « <dirigeant> has
+## been destroyed » en grand sur la carte, avec son portrait (anonyme s'il n'a jamais été rencontré), des feux
+## d'artifice et la clameur de victoire.
 func _check_destroyed() -> void:
 	for current in _world.players:
 		if current == _human or _destroyed.has(current.id) or not current.started:
 			continue
 		if _world.total_population(current.id) == 0:
 			_destroyed[current.id] = true
-			_map.show_destroyed(Locale.text("PLAYER_DESTROYED", {"number": current.id + 1,
-					"color": Locale.text(CellBackground.PLAYER_COLOR_NAMES[current.id])}))
+			# Un joueur jamais rencontré reste anonyme, même détruit.
+			if not _human.has_met(current.id):
+				_map.show_destroyed(Locale.text("PLAYER_DESTROYED_UNKNOWN"), Leaders.unknown_portrait())
+			else:
+				var portrait: Texture2D = null
+				var leader_name := _player_name(current)
+				if current.leader != "":
+					portrait = Leaders.portrait(current.leader)
+					leader_name = Leaders.display_name(current.leader)
+				_map.show_destroyed(Locale.text("PLAYER_DESTROYED", {"player": leader_name}), portrait)
 			_sounds.victory()
 
 
@@ -232,23 +244,27 @@ func _end_game(winner_id: int, human_alive: bool, abandoned: bool) -> void:
 	_history.record(_world, _elapsed + _clock.cycle_fraction() * rules.cycle_duration)
 	var names := {}
 	var colors := {}
+	var portraits := {}
 	for current in _world.players:
 		names[current.id] = _player_name(current)
 		colors[current.id] = CellBackground.PLAYER_COLORS[current.id]
+		if current.leader != "":
+			portraits[current.id] = Leaders.portrait(current.leader)
 	var popup := GameOverPopup.new()
 	add_child(popup)
-	popup.setup(_history, winner_id, _human.id, human_alive, names, colors, abandoned)
+	popup.setup(_history, winner_id, _human.id, human_alive, names, colors, abandoned, portraits)
 	popup.menu_requested.connect(_go_to_menu)
 
 
-## « You » pour le joueur local, sinon « AI » suivi de sa couleur et de son niveau (dans la langue du jeu).
+## « You » pour le joueur local, sinon le nom de son dirigeant suivi de son niveau (dans la langue du jeu).
 func _player_name(player: Player) -> String:
 	if player == _human:
 		return Locale.text("PLAYER_YOU")
 	var color := Locale.text(CellBackground.PLAYER_COLOR_NAMES[player.id])
 	for ai in _ais:
 		if ai.player_id == player.id:
-			return Locale.text("PLAYER_AI", {"color": color, "level": Locale.text(ai.profile.label)})
+			return Locale.text("PLAYER_AI", {"leader": Leaders.display_name(player.leader),
+					"level": Locale.text(ai.profile.label)})
 	return Locale.text("PLAYER_AI_SHORT", {"color": color})
 
 

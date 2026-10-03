@@ -50,9 +50,10 @@ AI_LEVEL_PACIFIST = pacifist
 AI_LEVEL_NORMAL = normal
 AI_LEVEL_AGGRESSIVE = aggressive
 PLAYER_YOU = You
-PLAYER_AI = AI {color} ({level})
+PLAYER_AI = {leader} ({level})
 PLAYER_AI_SHORT = AI {color}
-PLAYER_DESTROYED = Player #{number} ({color}) has been destroyed
+PLAYER_DESTROYED = {player} has been destroyed
+PLAYER_DESTROYED_UNKNOWN = An unknown civilization has been destroyed
 
 # --- Interface de jeu -----------------------------------------------------------------------------
 HUD_MENU = Menu
@@ -64,6 +65,10 @@ COMMON_YES = Yes
 COMMON_NO = No
 PLAYER_LIST_PLAYERS = Players
 PLAYER_LIST_TERRITORY = Territory
+PLAYER_LIST_POPULATION = Population
+PLAYER_LIST_ERA = Era
+PLAYER_LIST_UNKNOWN_NAME = Unknown
+ERA_ANTIQUITY = Antiquity
 PLAYER_LIST_UNKNOWN = ?
 PLAYER_LIST_DESTROYED = destroyed
 
@@ -106,3 +111,26 @@ GAME_OVER_MENU = Back to menu
 CHART_POPULATION = Population
 CHART_SCIENCE = Science
 CHART_FOOD = Food / cycle
+
+# --- Dirigeants des IA ----------------------------------------------------------------------------
+LEADER_ALEXANDER = Alexander the Great
+LEADER_CAESAR = Julius Caesar
+LEADER_ATTILA = Attila
+LEADER_GENGHIS = Genghis Khan
+LEADER_IVAN = Ivan the Terrible
+LEADER_NAPOLEON = Napoleon
+LEADER_MAO = Mao Zedong
+LEADER_AUGUSTUS = Augustus
+LEADER_CHARLEMAGNE = Charlemagne
+LEADER_ELIZABETH = Elizabeth I
+LEADER_LOUIS_XIV = Louis XIV
+LEADER_LINCOLN = Abraham Lincoln
+LEADER_TAIZONG = Tang Taizong
+LEADER_CHURCHILL = Winston Churchill
+LEADER_GANDHI = Gandhi
+LEADER_MLK = Martin Luther King Jr.
+LEADER_MANDELA = Nelson Mandela
+LEADER_DALAI_LAMA = The 14th Dalai Lama
+LEADER_SAINT_LOUIS = Saint Louis
+LEADER_MARCUS_AURELIUS = Marcus Aurelius
+LEADER_CONFUCIUS = Confucius

@@ -34,12 +34,17 @@ const FRONTIER_WIDTH := 2.0
 const NEON_GLOW_LAYERS := 4
 const NEON_PULSE_RATE := 0.6
 ## Fortifications des cases en vue qui ont une garnison (ennemies comprises), le long des frontières de
-## leur propriétaire (pas entre deux de ses cases) : palissade de pieux, puis mur de pierre crénelé à partir de WALL_STONE_GARRISON fighters.
+## leur propriétaire (pas entre deux de ses cases) : palissade de pieux, puis mur de pierre crénelé à partir
+## de WALL_STONE_GARRISON fighters. Elles montent avec la garnison (échelle logarithmique) : la palissade
+## de 1 à WALL_STONE_GARRISON fighters (pieux de STAKE_HEIGHT[0] à STAKE_HEIGHT[1]), le mur de pierre de
+## WALL_STONE_GARRISON à WALL_FULL_STONE (de STONE_HEIGHT[0] à STONE_HEIGHT[1]).
 ## Retrait (en rayons de case) vers l'intérieur de la case, et dimensions en rayons de case.
 const WALL_STONE_GARRISON := 100
+const WALL_FULL_STONE := 1000
 const WALL_INSET := 0.17
 const STAKE_SPACING := 0.1
-const STAKE_HEIGHT := 0.16
+const STAKE_HEIGHT := [0.04, 0.18]
+const STONE_HEIGHT := [0.04, 0.26]
 const STONE_WIDTH := 0.12
 const WOOD_COLORS := [Color("5a3a20"), Color("8a5a30"), Color("b07a44")]
 const STONE_COLORS := [Color("4a4a52"), Color("8e8e98"), Color("b8b8c0")]
@@ -168,7 +173,7 @@ func _draw() -> void:
 		var garrison := world.population(cell).whole("fighter")
 		if garrison > 0:
 			for line in _frontier_lines(cell, _hex_radius * WALL_INSET):
-				_draw_wall(line, garrison >= WALL_STONE_GARRISON)
+				_draw_wall(line, garrison)
 	# Population totale de chaque case en vue (celles du joueur comme les ennemies), sous son
 	# agglomération (voir CellBackground).
 	for cell in visible_cells:
@@ -225,9 +230,9 @@ func _draw() -> void:
 
 
 ## Annonce, en grand au centre de la carte, qu'un joueur ennemi vient d'être détruit (`text`), avec
-## feux d'artifice et trophée.
-func show_destroyed(text: String) -> void:
-	_effects.add(MapEffects.Kind.DESTROYED, NO_CELL, Color.WHITE, text)
+## feux d'artifice et son portrait (`portrait`, ou le trophée).
+func show_destroyed(text: String, portrait: Texture2D = null) -> void:
+	_effects.add(MapEffects.Kind.DESTROYED, NO_CELL, Color.WHITE, text, portrait)
 
 
 ## « +`amount` » qui s'envole de `cell` (clic sur Boost).
@@ -502,21 +507,21 @@ func _draw_food_flows(now: float) -> void:
 					Color(1.0, 1.0, 1.0, alpha))
 
 
-## Fortification le long de `line` : mur de pierre crénelé (`stone`), sinon palissade de pieux appointés,
-## dressés vers le haut de l'écran (vue de trois quarts) et éclairés à gauche.
-func _draw_wall(line: PackedVector2Array, stone: bool) -> void:
+## Fortification le long de `line` (son pied), à la hauteur que donne la garnison `garrison` (voir
+## WALL_STONE_GARRISON) : mur de pierre crénelé à partir de WALL_STONE_GARRISON fighters, sinon palissade
+## de pieux appointés. Tout se dresse vers le haut de l'écran (vue de trois quarts), éclairé à gauche.
+func _draw_wall(line: PackedVector2Array, garrison: int) -> void:
 	var outline_width := maxf(1.0, _hex_radius * 0.02)
+	var stone := garrison >= WALL_STONE_GARRISON
+	var height := 0.0
 	if stone:
-		var band := _hex_radius * STONE_WIDTH
-		# Face du mur, plus sombre, sous le chemin de ronde : le mur a de la hauteur.
-		var face := PackedVector2Array()
-		for point in line:
-			face.append(point + Vector2(0.0, band * 0.6))
-		draw_polyline(face, WALL_OUTLINE, band + outline_width * 2.0, true)
-		draw_polyline(face, STONE_COLORS[0], band, true)
-		draw_polyline(line, WALL_OUTLINE, band + outline_width * 2.0, true)
-		draw_polyline(line, STONE_COLORS[1], band, true)
+		var rise := clampf(log(float(garrison) / WALL_STONE_GARRISON) / log(float(WALL_FULL_STONE) / WALL_STONE_GARRISON),
+				0.0, 1.0)
+		height = _hex_radius * lerpf(STONE_HEIGHT[0], STONE_HEIGHT[1], rise)
+		_draw_stone_face(line, height, outline_width)
 	else:
+		var rise := clampf(log(float(garrison)) / log(float(WALL_STONE_GARRISON)), 0.0, 1.0)
+		height = _hex_radius * lerpf(STAKE_HEIGHT[0], STAKE_HEIGHT[1], rise)
 		draw_polyline(line, WALL_OUTLINE, outline_width * 2.5, true)
 	var spacing := _hex_radius * STAKE_SPACING
 	for i in line.size() - 1:
@@ -526,15 +531,40 @@ func _draw_wall(line: PackedVector2Array, stone: bool) -> void:
 		for k in count:
 			var spot := a.lerp(b, (k + 0.5) / count)
 			if stone:
-				_draw_merlon(spot)
+				_draw_merlon(spot - Vector2(0.0, height))
 			else:
-				_draw_stake(spot)
+				_draw_stake(spot, height)
 
 
-## Pieu de palissade planté en `foot` : corps de bois éclairé à gauche, pointe en haut, cerné de sombre.
-func _draw_stake(foot: Vector2) -> void:
+## Mur de pierre de `height` pixels dressé sur `line` : face sombre striée d'assises de pierre, puis le
+## chemin de ronde clair à son sommet.
+func _draw_stone_face(line: PackedVector2Array, height: float, outline_width: float) -> void:
+	var lift := Vector2(0.0, -height)
+	var course := _hex_radius * STONE_WIDTH * 0.5
+	for i in line.size() - 1:
+		var a := line[i]
+		var b := line[i + 1]
+		var face := PackedVector2Array([a, b, b + lift, a + lift])
+		draw_colored_polygon(face, STONE_COLORS[0])
+		# Assises : une ligne de joint toutes les `course` pixels de hauteur.
+		var rows := floori(height / course)
+		for row in range(1, rows + 1):
+			var up := Vector2(0.0, -row * course)
+			draw_line(a + up, b + up, WALL_OUTLINE.lerp(STONE_COLORS[0], 0.5), maxf(1.0, outline_width * 0.6), true)
+		face.append(face[0])
+		draw_polyline(face, WALL_OUTLINE, outline_width, true)
+	var top := PackedVector2Array()
+	for point in line:
+		top.append(point + lift)
+	var walk := _hex_radius * STONE_WIDTH * 0.6
+	draw_polyline(top, WALL_OUTLINE, walk + outline_width * 2.0, true)
+	draw_polyline(top, STONE_COLORS[1], walk, true)
+
+
+## Pieu de palissade de `h` pixels planté en `foot` : corps de bois éclairé à gauche, pointe en haut,
+## cerné de sombre.
+func _draw_stake(foot: Vector2, h: float) -> void:
 	var w := _hex_radius * STAKE_SPACING * 0.7
-	var h := _hex_radius * STAKE_HEIGHT
 	var body := PackedVector2Array([foot + Vector2(-w / 2.0, 0.0), foot + Vector2(w / 2.0, 0.0),
 			foot + Vector2(w / 2.0, -h), foot + Vector2(0.0, -h - w * 0.7), foot + Vector2(-w / 2.0, -h)])
 	draw_colored_polygon(body, WOOD_COLORS[1])
@@ -544,10 +574,10 @@ func _draw_stake(foot: Vector2) -> void:
 	draw_polyline(body, WALL_OUTLINE, maxf(1.0, _hex_radius * 0.015), true)
 
 
-## Merlon de mur de pierre posé sur le chemin de ronde en `spot` : bloc éclairé à gauche, cerné de sombre.
+## Merlon posé sur le chemin de ronde en `spot` (le sommet du mur) : bloc éclairé à gauche, cerné de sombre.
 func _draw_merlon(spot: Vector2) -> void:
-	var s := _hex_radius * STONE_WIDTH * 0.8
-	var block := Rect2(spot + Vector2(-s / 2.0, -s * 1.2), Vector2(s, s))
+	var s := _hex_radius * STONE_WIDTH * 0.7
+	var block := Rect2(spot + Vector2(-s / 2.0, -s), Vector2(s, s))
 	draw_rect(block, STONE_COLORS[1])
 	draw_rect(Rect2(block.position, Vector2(s * 0.35, s)), STONE_COLORS[2])
 	draw_rect(Rect2(block.position + Vector2(0.0, s * 0.75), Vector2(s, s * 0.25)), STONE_COLORS[0])

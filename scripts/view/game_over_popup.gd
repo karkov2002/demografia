@@ -19,9 +19,10 @@ const ILLUSTRATION_SIZE := 72.0
 
 ## Construit la fenêtre de la partie finie, gagnée par `winner_id` (World.NO_PLAYER : pas de gagnant
 ## unique), vue par `viewer_id`, encore en lice ou non (`viewer_alive`), ou abandonnée par lui
-## (`abandoned`) ; les joueurs sont nommés et colorés selon `names` et `colors` (par identifiant).
+## (`abandoned`) ; les joueurs sont nommés, colorés et illustrés selon `names`, `colors` et `portraits` (par
+## identifiant).
 func setup(history: GameHistory, winner_id: int, viewer_id: int, viewer_alive: bool, names: Dictionary,
-		colors: Dictionary, abandoned: bool = false) -> void:
+		colors: Dictionary, abandoned: bool = false, portraits: Dictionary = {}) -> void:
 	var content := _build_frame()
 	var headline := Locale.text("GAME_OVER_VICTORY")
 	var result := Locale.text("GAME_OVER_YOU_WIN") if winner_id == viewer_id \
@@ -39,7 +40,7 @@ func setup(history: GameHistory, winner_id: int, viewer_id: int, viewer_alive: b
 	content.add_child(_illustration(illustration))
 	content.add_child(_label(headline, 30, INK))
 	content.add_child(_label(result, 16, MUTED_INK))
-	content.add_child(_legend(names, colors))
+	content.add_child(_legend(names, colors, portraits))
 
 	# Un onglet par graphique, pour bien voir chacun.
 	var screen := get_viewport_rect().size
@@ -88,8 +89,8 @@ func _illustration(icon: Texture2D) -> TextureRect:
 	return picture
 
 
-## Légende : une pastille de la couleur de chaque joueur suivie de son nom.
-func _legend(names: Dictionary, colors: Dictionary) -> HBoxContainer:
+## Légende : une pastille de la couleur de chaque joueur, son portrait s'il en a un, puis son nom.
+func _legend(names: Dictionary, colors: Dictionary, portraits: Dictionary) -> HBoxContainer:
 	var legend := HBoxContainer.new()
 	legend.alignment = BoxContainer.ALIGNMENT_CENTER
 	legend.add_theme_constant_override("separation", 18)
@@ -100,6 +101,10 @@ func _legend(names: Dictionary, colors: Dictionary) -> HBoxContainer:
 		swatch.custom_minimum_size = Vector2(14.0, 14.0)
 		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		entry.add_child(swatch)
+		if portraits.has(player_id):
+			var picture := _illustration(portraits[player_id])
+			picture.custom_minimum_size = Vector2.ONE * 28.0
+			entry.add_child(picture)
 		entry.add_child(_label(names[player_id], 14, INK))
 		legend.add_child(entry)
 	return legend

@@ -10,6 +10,11 @@ var growth_factor: float
 var science: float = 0.0
 ## A-t-il choisi sa case de départ ? (Il reste vrai même s'il perd ensuite toutes ses cases.)
 var started: bool = false
+## Ère de sa civilisation (clé : antiquity…). Pour l'instant toujours l'Antiquité : la science la fera
+## avancer.
+var era: String = "antiquity"
+## Dirigeant d'une IA (voir Leaders), ou "" pour un humain.
+var leader: String = ""
 ## Or ; ne descend jamais sous 0 (les scientists et fighters sont reconvertis à la place).
 var gold: float = 0.0
 
