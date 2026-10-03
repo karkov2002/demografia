@@ -19,6 +19,16 @@ const FULL_POPULATION := 1024.0
 	Terrain.Type.MOUNTAIN: 256.0,
 	Terrain.Type.WATER: 0.0,
 }
+## Population maximale d'un village (toute case peuplée l'est d'abord) : sa croissance s'y arrête net.
+## Le joueur peut alors faire passer la case en ville, qui grandit jusqu'à la capacité de son terrain.
+## Seuls les villages produisent de la food ; seules les villes accueillent des scientists.
+@export var village_capacity: float = 256.0
+## Une ville grandit plus lentement : son accroissement par cycle est multiplié par ce facteur.
+@export var city_growth_factor: float = 0.5
+## Une ville remplie à au moins cette part de la capacité de son terrain est une mégapole : ses remparts
+## multiplient la force de sa garnison par megapolis_defense.
+@export var megapolis_threshold: float = 2.0 / 3.0
+@export var megapolis_defense: float = 1.5
 ## Durée d'un cycle, en secondes.
 @export var cycle_duration: float = 1.0
 ## Population posée sur la case de départ.
@@ -55,12 +65,20 @@ const FULL_POPULATION := 1024.0
 @export var max_settlers: int = 32
 ## Durée (s) du trajet des colons et des troupes jusqu'à la case voisine ; ils n'y arrivent qu'ensuite.
 @export var travel_time: float = 1.0
-## Or rapporté (ou coûté, si négatif) par chaque individu d'un rôle, à chaque cycle.
+## Or rapporté (ou coûté, si négatif) par chaque individu d'un rôle, à chaque cycle ; un worker d'une
+## ville rapporte city_gold_per_worker à la place.
 @export var gold_per_role: Dictionary[String, float] = {"worker": 2.0, "scientist": -1.0, "fighter": -1.0}
-## Food produite par chaque worker, à chaque cycle.
+@export var city_gold_per_worker: float = 3.0
+## Food produite par chaque worker d'un village, à chaque cycle (ceux d'une ville n'en produisent pas).
 @export var food_per_worker: float = 3.0
-## Food consommée par chaque worker, scientist ou fighter, à chaque cycle.
+## Food consommée par chaque worker, scientist ou fighter de la garnison, à chaque cycle : dans un
+## village, et dans une ville (un citadin mange plus : 6 villages pleins nourrissent juste une ville
+## pleine).
 @export var food_per_individual: float = 1.0
+@export var city_food_per_individual: float = 3.0
+## Food consommée par chaque fighter de la troupe d'une case, à chaque cycle (ration : un village plein
+## nourrit juste une troupe complète). Les colons, et les troupes en route ou en bataille, ne mangent pas.
+@export var army_food: float = 0.5
 ## Famine : délai de grâce (s) pendant lequel une case peut manquer de food sans perte, puis délai
 ## (s) entre deux morts tant qu'elle en manque.
 @export var starvation_grace: float = 1.0

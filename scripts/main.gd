@@ -68,6 +68,7 @@ func _ready() -> void:
 	add_child(_sounds)
 	add_child(BackgroundMusic.new())
 	_world.owner_changed.connect(_on_owner_changed)
+	_world.city_lost.connect(_on_city_lost)
 	_update_stats()
 	# Inactif tant qu'aucune case n'est sélectionnée.
 	_start_button.disabled = true
@@ -76,6 +77,8 @@ func _ready() -> void:
 	_preview.transfer_requested.connect(_on_transfer_requested)
 	_map.units_sent.connect(_on_units_sent)
 	_preview.boost_requested.connect(_on_boost_requested)
+	_preview.city_requested.connect(_on_city_requested)
+	_preview.downgrade_requested.connect(_on_downgrade_requested)
 	_preview.button_clicked.connect(_sounds.click)
 
 
@@ -115,6 +118,12 @@ func _on_owner_changed(_cell: Vector2i, previous_owner: int, new_owner: int, by_
 		_sounds.defeat()
 
 
+## Choc sourd et foule consternée quand la famine fait redevenir village une ville du joueur.
+func _on_city_lost(cell: Vector2i, by_famine: bool) -> void:
+	if by_famine and _world.owner(cell) == _human.id:
+		_sounds.defeat()
+
+
 ## L'humain choisit sa case en premier, puis chaque IA tire la sienne au hasard.
 func _on_start_pressed() -> void:
 	if not _world.execute(StartCommand.new(_human.id, _map.selected_cell)):
@@ -138,6 +147,28 @@ func _on_boost_requested() -> void:
 		_sounds.laser()
 		_preview.show_boost(added)
 		_map.show_boost(cell, added)
+
+
+## Le village du zoom passe en ville.
+func _on_city_requested() -> void:
+	if _world.execute(FoundCityCommand.new(_human.id, _preview.cell)):
+		_sounds.city()
+
+
+## La ville du zoom redevient village, après confirmation : elle va perdre des habitants. Le jeu
+## continue pendant la question.
+func _on_downgrade_requested() -> void:
+	var cell := _preview.cell
+	var village := floori(_world.rules.village_capacity)
+	var lost := maxi(0, floori(_world.population(cell).residents() + 1e-6) - village)
+	var popup := ConfirmPopup.new()
+	add_child(popup)
+	var message := "La ville perdra %s habitants pour revenir à %d,\net ses scientists redeviendront workers." \
+			% [NumberFormat.compact(lost), village]
+	popup.setup("Redevenir un village ?", message, "Annuler", "Downgrade")
+	popup.confirmed.connect(func() -> void:
+		_world.execute(DowngradeCityCommand.new(_human.id, cell))
+		popup.queue_free())
 
 
 func _on_transfer_requested(from_role: String, to_role: String, amount: int) -> void:

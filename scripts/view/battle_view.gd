@@ -67,7 +67,7 @@ static func belligerents(world: World, viewer_id: int, cell: Vector2i) -> Array:
 				defender.append([Icons.POPULATION_TINT, NumberFormat.compact(civilians), color, color])
 		else:
 			var total := defenders.whole_total()
-			defender.append([Icons.settlement(total / world.capacity(cell)), NumberFormat.compact(total), color, color])
+			defender.append([Icons.settlement(world, cell), NumberFormat.compact(total), color, color])
 	var attackers := []
 	for attacker in battle.fighters:
 		attackers.append([Icons.SWORD, NumberFormat.compact(battle.fighters[attacker]),

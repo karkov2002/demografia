@@ -3,7 +3,8 @@ extends RefCounted
 ## Joueur IA : observe le monde et agit en émettant des commandes, exactement comme un humain. Il ne
 ## voit que ce que voit un humain (brouillard de guerre : population totale seulement chez l'ennemi).
 ## À chaque cycle, par ordre de priorité : secourir ses cases assiégées, attaquer une voisine faible,
-## ajuster garnison et scientists de chaque case, envoyer des colons, puis cliquer sur Boost. Son
+## faire passer en ville ses villages pleins bien entourés, ajuster garnison et scientists de chaque
+## case, envoyer des colons, puis cliquer sur Boost. Son
 ## caractère (AIProfile) règle chacune de ces étapes.
 
 var player_id: int
@@ -54,6 +55,7 @@ func play_cycle() -> Array[Command]:
 	_action_wait = maxf(0.0, _action_wait - _world.rules.cycle_duration)
 	_relieve_sieges(commands)
 	_attack(commands)
+	_found_cities(commands)
 	for cell in _peaceful_cells():
 		_staff(cell, commands)
 	_colonize(commands)
@@ -88,12 +90,15 @@ func _threat(cell: Vector2i) -> int:
 	return threat
 
 
-## Scientists et fighters que peut nourrir et payer chaque worker (le moins favorable des deux).
-func _support_per_worker() -> float:
+## Scientists et fighters que peut nourrir et payer chaque worker (le moins favorable des deux). Dans
+## une ville (`city`), seul l'or compte : ses workers ne produisent pas de food, et ses voisines la
+## nourrissent quel que soit le rôle de ses habitants.
+func _support_per_worker(city: bool) -> float:
 	var rules := _world.rules
-	var by_food := (rules.food_per_worker - rules.food_per_individual) / rules.food_per_individual
+	var by_food := INF if city else (rules.food_per_worker - rules.food_per_individual) / rules.food_per_individual
 	var cost := -minf(rules.gold_per_role["scientist"], rules.gold_per_role["fighter"])
-	var by_gold: float = rules.gold_per_role["worker"] / cost if cost > 0.0 else INF
+	var worker_gold: float = rules.city_gold_per_worker if city else rules.gold_per_role["worker"]
+	var by_gold := worker_gold / cost if cost > 0.0 else INF
 	return minf(by_food, by_gold)
 
 
@@ -131,7 +136,7 @@ func _relieve_sieges(commands: Array[Command]) -> void:
 		if not _world.is_at_war(cell):
 			continue
 		var attack := _world.attacker_strength(_world.battle(cell).total_fighters())
-		var per_fighter := rules.garrison_strength * _world.defense_bonus(cell)
+		var per_fighter := rules.garrison_strength * _world.garrison_bonus(cell)
 		# Les renforts déjà en route comptent.
 		var needed := ceili(attack / per_fighter) + 1 - _world.population(cell).whole("fighter") \
 				- _world.incoming(player_id, cell, true)
@@ -184,7 +189,7 @@ func _attack(commands: Array[Command]) -> void:
 ## World.assault_survivors), ou 0 si même rules.max_army n'y suffirait pas. Mémorisée par effectif et
 ## bonus de défense.
 func _army_to_win(garrison: int, cell: Vector2i) -> int:
-	var key := Vector2i(garrison, roundi(_world.defense_bonus(cell) * 100.0))
+	var key := Vector2i(garrison, roundi(_world.garrison_bonus(cell) * 100.0))
 	if not _army_needed.has(key):
 		var high := _world.rules.max_army
 		if _world.assault_survivors(high, garrison, cell) <= 0:
@@ -224,20 +229,55 @@ func _watch_enemies() -> void:
 # --- Garnison et science -------------------------------------------------------------------------
 
 ## Ajuste garnison et scientists de `cell` à ce que vise le profil, dans la limite de ce que ses workers
-## peuvent nourrir et payer. La science est servie d'abord (sa part est fixée par le profil), la
-## garnison prend le reste du budget.
+## peuvent nourrir et payer. La science est servie d'abord (sa part est fixée par le profil ; seulement
+## dans une ville), la garnison prend le reste du budget.
 func _staff(cell: Vector2i, commands: Array[Command]) -> void:
 	var cell_population := _world.population(cell)
 	var fighters := cell_population.whole("fighter")
 	var scientists := cell_population.whole("scientist")
 	var people := cell_population.whole("worker") + fighters + scientists
+	var city := _world.is_city(cell)
 	# Avec f fighters et s scientists : f + s ≤ k × (people - f - s), soit f + s ≤ k × people / (1 + k).
-	var support := _support_per_worker() * profile.budget_share
+	var support := _support_per_worker(city) * profile.budget_share
 	var budget := floori(people * support / (1.0 + support))
-	var wanted_scientists := mini(floori(people * profile.science_ratio), budget)
+	var wanted_scientists := mini(floori(people * profile.science_ratio), budget) if city else 0
 	var wanted_fighters := mini(ceili(_threat(cell) * profile.garrison_ratio), budget - wanted_scientists)
 	_adjust(cell, "fighter", fighters, wanted_fighters, commands)
 	_adjust(cell, "scientist", scientists, wanted_scientists, commands)
+
+
+## Fait passer en ville chaque village plein dont les voisines pourraient nourrir la ville qu'il
+## deviendrait, avec la marge profile.city_food_margin : sans cela, elle redeviendrait aussitôt village
+## par la famine. Comme la garnison et la science, c'est un simple bouton du zoom : pas une action sur
+## la carte.
+func _found_cities(commands: Array[Command]) -> void:
+	var rules := _world.rules
+	for cell in _peaceful_cells():
+		if not _world.can_found_city(player_id, cell):
+			continue
+		var cell_population := _world.population(cell)
+		var need := cell_population.residents() * rules.city_food_per_individual + cell_population.army * rules.army_food
+		if _food_supply(cell, need) >= need * profile.city_food_margin:
+			commands.append(FoundCityCommand.new(player_id, cell))
+
+
+## Food que les voisines de `cell` lui enverraient si elle manquait de `need` food par cycle : chacune
+## partage son surplus entre ses voisines dans le besoin, en proportion de leur manque (voir
+## World.food_exports).
+func _food_supply(cell: Vector2i, need: float) -> float:
+	var supply := 0.0
+	for neighbor in _world.neighbors(cell):
+		if not _world.can_command(player_id, neighbor):
+			continue
+		var surplus := _world.food_balance(neighbor)
+		if surplus <= 0.0:
+			continue
+		var other_needs := 0.0
+		for around in _world.neighbors(neighbor):
+			if around != cell and _world.can_command(player_id, around):
+				other_needs += maxf(0.0, -_world.food_balance(around))
+		supply += need * minf(1.0, surplus / (need + other_needs))
+	return supply
 
 
 ## Convertit des workers en `role` (ou l'inverse) pour passer de `current` à `wanted` individus.
@@ -260,7 +300,7 @@ func _colonize(commands: Array[Command]) -> void:
 	var best_target := World.NO_CELL
 	var best_fill := 0.0
 	for cell in _peaceful_cells():
-		var fill := _world.population(cell).total() / _world.capacity(cell)
+		var fill := _world.population(cell).residents() / _world.terrain_capacity(cell)
 		if fill < profile.settle_fill_ratio or fill <= best_fill:
 			continue
 		var target := _best_free_neighbor(cell, {})
@@ -289,7 +329,7 @@ func _best_free_neighbor(cell: Vector2i, claimed: Dictionary[Vector2i, bool]) ->
 		if claimed.has(neighbor) or _world.owner(neighbor) != World.NO_PLAYER or _world.capacity(neighbor) <= 0.0 \
 				or _world.is_at_war(neighbor) or _world.incoming(player_id, neighbor, false) > 0:
 			continue
-		var score := _world.capacity(neighbor) / _world.rules.capacity[Terrain.Type.PRAIRIE] + _rng.randf() * 0.05
+		var score := _world.terrain_capacity(neighbor) / _world.rules.capacity[Terrain.Type.PRAIRIE] + _rng.randf() * 0.05
 		for around in _world.neighbors(neighbor):
 			if _world.owner(around) == World.NO_PLAYER and _world.capacity(around) > 0.0:
 				score += 0.1
@@ -320,7 +360,7 @@ func _boost(commands: Array[Command]) -> void:
 		for cell in _world.cells_of(player_id):
 			if not _world.can_command(player_id, cell) or _world.free_room(cell) <= added.get(cell, 0):
 				continue
-			var fill: float = (_world.population(cell).total() + added.get(cell, 0)) / _world.capacity(cell)
+			var fill: float = (_world.population(cell).residents() + added.get(cell, 0)) / _world.capacity(cell)
 			if fill < best_fill:
 				best = cell
 				best_fill = fill

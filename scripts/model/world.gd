@@ -9,6 +9,11 @@ signal changed
 ## Émis quand `cell` change de propriétaire (World.NO_PLAYER quand personne) : par la guerre
 ## (`by_war`, défenseur tombé ou conquête) ou par la colonisation.
 signal owner_changed(cell: Vector2i, previous_owner: int, new_owner: int, by_war: bool)
+## Émis quand un village passe en ville.
+signal city_founded(cell: Vector2i)
+## Émis quand une ville redevient un village : rétrogradée par son propriétaire, ou par la famine
+## (`by_famine`).
+signal city_lost(cell: Vector2i, by_famine: bool)
 
 const NO_CELL := Vector2i(-1, -1)
 const NO_PLAYER := -1
@@ -30,6 +35,9 @@ var _overcrowding: Dictionary[Vector2i, float] = {}
 var _battles: Dictionary[Vector2i, Battle] = {}
 ## Colons en route vers une case voisine.
 var _convoys: Array[Convoy] = []
+## Cases passées en ville (les autres cases peuplées sont des villages). Le statut reste attaché à la
+## case quand elle change de main par la guerre ; il se perd quand elle se vide.
+var _cities: Dictionary[Vector2i, bool] = {}
 
 
 func _init(game_rules: GameRules) -> void:
@@ -90,7 +98,15 @@ func set_terrain(cell: Vector2i, type: Terrain.Type) -> void:
 	changed.emit()
 
 
+## Population maximale de `cell` (règle d'or) : celle de son terrain pour une ville, au plus
+## rules.village_capacity pour un village.
 func capacity(cell: Vector2i) -> float:
+	var terrain_limit := terrain_capacity(cell)
+	return terrain_limit if is_city(cell) else minf(terrain_limit, rules.village_capacity)
+
+
+## Capacité du terrain de `cell`, celle d'une ville : c'est elle qui freine la croissance (courbe en S).
+func terrain_capacity(cell: Vector2i) -> float:
 	return rules.capacity.get(terrain(cell), 0.0)
 
 
@@ -173,24 +189,24 @@ func winner() -> int:
 	return alive[0] if is_game_over() and alive.size() == 1 else NO_PLAYER
 
 
-## Places libres dans `cell` avant d'atteindre sa capacité (règle d'or) ; les fighters qui y livrent
-## bataille et ceux qui sont en route vers elle avec une place réservée (voir Convoy) occupent aussi
-## de la place.
+## Places libres pour les habitants de `cell` avant d'atteindre sa capacité (règle d'or) ; les fighters
+## qui y livrent bataille et les colons en route vers elle avec une place réservée (voir Convoy) en
+## occupent aussi. La troupe n'en prend pas : elle a sa propre place (voir army_room).
 func free_room(cell: Vector2i) -> int:
 	var cell_population := population(cell)
-	var used := 0.0 if cell_population == null else cell_population.total()
+	var used := 0.0 if cell_population == null else cell_population.residents()
 	if _battles.has(cell):
 		used += _battles[cell].total_fighters()
 	for convoy in _convoys:
-		if convoy.to_cell == cell and convoy.reserves_room:
+		if convoy.to_cell == cell and convoy.reserves_room and not convoy.is_army:
 			used += convoy.units
 	return maxi(0, floori(capacity(cell) - used + 1e-6))
 
 
-## La case compte-t-elle plus d'individus que sa capacité (règle d'or) ? Seule une bataille peut y
+## La case compte-t-elle plus d'habitants que sa capacité (règle d'or) ? Seule une bataille peut y
 ## mener : renforts et attaquants n'y sont pas limités.
 func is_overcrowded(cell: Vector2i) -> bool:
-	return population(cell) != null and population(cell).total() > capacity(cell) + 1e-6
+	return population(cell) != null and population(cell).residents() > capacity(cell) + 1e-6
 
 
 ## Multiplicateurs de croissance du joueur : ceux des règles, dont l'accroissement est modulé par
@@ -202,23 +218,106 @@ func growth_rates(player_id: int) -> Dictionary[String, float]:
 	return rates
 
 
+## Multiplicateurs de croissance de `cell` : ceux de son propriétaire, ralentis dans une ville
+## (rules.city_growth_factor).
+func cell_growth_rates(cell: Vector2i) -> Dictionary[String, float]:
+	var rates := growth_rates(owner(cell))
+	if is_city(cell):
+		for role in rates:
+			rates[role] = 1.0 + (rates[role] - 1.0) * rules.city_growth_factor
+	return rates
+
+
 ## Avancement de chaque rôle de `cell` vers sa prochaine unité (voir Population.progress).
 func progress(cell: Vector2i, cycle_fraction: float) -> Dictionary[String, float]:
 	var cell_population := population(cell)
 	if cell_population == null:
 		return {}
 	# Case en guerre : figée, aucune croissance en cours.
-	var room := 0.0 if is_at_war(cell) else capacity(cell)
-	return cell_population.progress(growth_rates(cell_population.owner), room, cycle_fraction)
+	var room := 0.0 if is_at_war(cell) else terrain_capacity(cell)
+	return cell_population.progress(cell_growth_rates(cell), room, cycle_fraction, _growth_limit(cell))
+
+
+## Plafond net de croissance de `cell` (voir Population.grow) : la capacité d'un village, aucun (0) pour
+## une ville.
+func _growth_limit(cell: Vector2i) -> float:
+	return 0.0 if is_city(cell) else capacity(cell)
+
+
+# --- Villages et villes --------------------------------------------------------------------------
+
+## Toute case peuplée est d'abord un village : au plus rules.village_capacity individus, des workers qui
+## produisent de la food, aucun scientist. Une ville grandit jusqu'à la capacité de son terrain et
+## accueille des scientists, mais ses workers ne produisent plus de food : elle doit être nourrie par
+## ses voisines.
+func is_city(cell: Vector2i) -> bool:
+	return _cities.has(cell)
+
+
+## Une mégapole est une ville remplie à au moins rules.megapolis_threshold de la capacité de son
+## terrain (habitants seulement) ; ses remparts renforcent sa garnison (voir garrison_bonus).
+func is_megapolis(cell: Vector2i) -> bool:
+	return is_city(cell) and population(cell) != null \
+			and population(cell).residents() >= rules.megapolis_threshold * terrain_capacity(cell) - 1e-6
+
+
+## Le joueur peut-il faire passer `cell` en ville ? Seulement un village à lui, en paix, plein (la
+## troupe ne compte pas).
+func can_found_city(player_id: int, cell: Vector2i) -> bool:
+	return can_command(player_id, cell) and not is_city(cell) \
+			and population(cell).residents() >= capacity(cell) - 1e-3
+
+
+## Fait passer `cell` en ville ; renvoie false si c'est impossible (voir can_found_city).
+func found_city(player_id: int, cell: Vector2i) -> bool:
+	if not can_found_city(player_id, cell):
+		return false
+	_cities[cell] = true
+	city_founded.emit(cell)
+	changed.emit()
+	return true
+
+
+## Le joueur peut-il faire redevenir `cell` un village ? Seulement une ville à lui, en paix.
+func can_downgrade_city(player_id: int, cell: Vector2i) -> bool:
+	return can_command(player_id, cell) and is_city(cell)
+
+
+## Fait redevenir `cell` un village (voir _make_village) ; renvoie false si c'est impossible (voir
+## can_downgrade_city).
+func downgrade_city(player_id: int, cell: Vector2i) -> bool:
+	if not can_downgrade_city(player_id, cell):
+		return false
+	_make_village(cell)
+	city_lost.emit(cell, false)
+	changed.emit()
+	return true
+
+
+## La ville `cell` redevient un village : ses scientists redeviennent workers (un village n'en accueille
+## pas), puis les habitants qui dépassent la capacité d'un village disparaissent : des workers d'abord,
+## puis la garnison, puis les colons. La troupe, qui a sa propre place, reste entière.
+func _make_village(cell: Vector2i) -> void:
+	_cities.erase(cell)
+	var cell_population := population(cell)
+	cell_population.counts["worker"] += cell_population.counts["scientist"]
+	cell_population.counts["scientist"] = 0.0
+	var excess := cell_population.residents() - capacity(cell)
+	for role in ["worker", "fighter"]:
+		var lost := clampf(excess, 0.0, cell_population.counts[role])
+		cell_population.counts[role] -= lost
+		excess -= lost
+	cell_population.settlers -= clampi(ceili(excess - 1e-6), 0, cell_population.settlers)
 
 
 # --- Économie ------------------------------------------------------------------------------------
 
-## Science produite par le joueur à chaque cycle (rien par ses cases en guerre, qui sont figées).
+## Science produite par le joueur à chaque cycle, par les scientists de ses villes (rien par ses cases
+## en guerre, qui sont figées, ni par ses villages).
 func science_rate(player_id: int) -> float:
 	var rate := 0.0
 	for cell in cells_of(player_id):
-		if not is_at_war(cell):
+		if is_city(cell) and not is_at_war(cell):
 			rate += _populations[cell].whole("scientist") * rules.science_per_scientist
 	return rate
 
@@ -231,7 +330,10 @@ func cell_income(cell: Vector2i) -> float:
 		return 0.0
 	var income := 0.0
 	for role in rules.gold_per_role:
-		income += cell_population.whole(role) * rules.gold_per_role[role]
+		var gold: float = rules.gold_per_role[role]
+		if role == "worker" and is_city(cell):
+			gold = rules.city_gold_per_worker
+		income += cell_population.whole(role) * gold
 	return income
 
 
@@ -280,8 +382,10 @@ func _most_costly_cell(player_id: int) -> Vector2i:
 
 # --- Nourriture ----------------------------------------------------------------------------------
 
-## Solde de food de `cell` à chaque cycle : production des workers moins la consommation de chaque
-## worker, scientist ou fighter (les colons ne mangent pas).
+## Solde de food de `cell` à chaque cycle : production des workers (dans un village seulement) moins la
+## consommation de chaque worker, scientist ou fighter de la garnison (rules.food_per_individual, ou
+## rules.city_food_per_individual dans une ville), et de la ration de sa troupe (rules.army_food). Les
+## colons ne mangent pas. La troupe est ainsi nourrie par sa case avant que le surplus ne soit exporté.
 func food_balance(cell: Vector2i) -> float:
 	var cell_population := population(cell)
 	if cell_population == null:
@@ -289,7 +393,9 @@ func food_balance(cell: Vector2i) -> float:
 	var eaters := 0
 	for role in cell_population.counts:
 		eaters += cell_population.whole(role)
-	return cell_population.whole("worker") * rules.food_per_worker - eaters * rules.food_per_individual
+	var produced := 0.0 if is_city(cell) else cell_population.whole("worker") * rules.food_per_worker
+	var ration := rules.city_food_per_individual if is_city(cell) else rules.food_per_individual
+	return produced - eaters * ration - cell_population.army * rules.army_food
 
 
 ## Solde de food de toutes les cases du joueur.
@@ -300,19 +406,26 @@ func total_food_balance(player_id: int) -> float:
 	return balance
 
 
-## Food envoyée par `cell` à chaque voisine ({ voisine: quantité }) : son surplus est partagé à
-## parts égales entre les cases voisines de son propriétaire. Vide sans surplus ou sans voisine.
+## Food envoyée par `cell` à chaque voisine ({ voisine: quantité }) : son surplus va seulement aux
+## voisines de son propriétaire qui manquent de food (solde négatif), en proportion de leur manque et
+## sans le dépasser ; ce qui reste est perdu. Les cases en guerre, figées, n'envoient ni ne reçoivent
+## rien. Vide sans surplus ou sans voisine dans le besoin.
 func food_exports(cell: Vector2i) -> Dictionary[Vector2i, float]:
 	var exports: Dictionary[Vector2i, float] = {}
 	var surplus := food_balance(cell)
-	if surplus <= 0.0:
+	if surplus <= 0.0 or is_at_war(cell):
 		return exports
-	var recipients: Array[Vector2i] = []
+	var needs: Dictionary[Vector2i, float] = {}
+	var total_need := 0.0
 	for neighbor in neighbors(cell):
-		if owner(neighbor) == owner(cell):
-			recipients.append(neighbor)
-	for neighbor in recipients:
-		exports[neighbor] = surplus / recipients.size()
+		if owner(neighbor) == owner(cell) and not is_at_war(neighbor):
+			var need := -food_balance(neighbor)
+			if need > 0.0:
+				needs[neighbor] = need
+				total_need += need
+	var share := minf(1.0, surplus / total_need) if total_need > 0.0 else 0.0
+	for neighbor in needs:
+		exports[neighbor] = needs[neighbor] * share
 	return exports
 
 
@@ -340,10 +453,11 @@ func is_starving(cell: Vector2i) -> bool:
 
 
 ## Famine et surpeuplement, appelés toutes les rules.starvation_interval secondes. Une case qui manque
-## de food depuis plus de rules.starvation_grace secondes perd un individu, en priorité un scientist,
-## puis un fighter, puis un worker, jusqu'à retrouver l'équilibre. Une case qui dépasse sa capacité
-## (après une bataille) depuis aussi longtemps perd de même un fighter, ou à défaut un fighter de sa
-## troupe, jusqu'à revenir à sa capacité.
+## de food depuis plus de rules.starvation_grace secondes perd un individu, en priorité un fighter de sa
+## troupe, puis un scientist, puis un fighter de la garnison, puis un worker, jusqu'à retrouver
+## l'équilibre. Une case qui dépasse sa capacité (après une bataille) depuis aussi longtemps perd de
+## même un fighter de sa garnison, jusqu'à revenir à sa capacité. Une ville que la famine ramène à
+## rules.village_capacity habitants ou moins redevient un village.
 func starve() -> void:
 	var starving: Array[Vector2i] = []
 	var overcrowded: Array[Vector2i] = []
@@ -357,9 +471,14 @@ func starve() -> void:
 			overcrowded.append(cell)
 	var deaths := false
 	for cell in _due_deaths(_hunger, starving):
-		deaths = _kill_one(cell, ["scientist", "fighter", "worker"]) or deaths
+		if _kill_one(cell, [Population.ARMY, "scientist", "fighter", "worker"]):
+			deaths = true
+			# Une ville affamée retombée à la taille d'un village redevient un village.
+			if is_city(cell) and population(cell).residents() <= rules.village_capacity + 1e-6:
+				_make_village(cell)
+				city_lost.emit(cell, true)
 	for cell in _due_deaths(_overcrowding, overcrowded):
-		deaths = _kill_one(cell, ["fighter", Population.ARMY]) or deaths
+		deaths = _kill_one(cell, ["fighter"]) or deaths
 	if deaths:
 		changed.emit()
 
@@ -415,10 +534,9 @@ func tick() -> void:
 	for current in players:
 		current.science += science_rate(current.id)
 		_collect_gold(current.id)
-		var rates := growth_rates(current.id)
 		for cell in cells_of(current.id):
 			if not is_at_war(cell):
-				_populations[cell].grow(rates, capacity(cell))
+				_populations[cell].grow(cell_growth_rates(cell), terrain_capacity(cell), _growth_limit(cell))
 	changed.emit()
 
 
@@ -451,15 +569,19 @@ func start_at(player_id: int, cell: Vector2i) -> bool:
 ## Fait passer jusqu'à `amount` individus de `from_role` à `to_role` dans une case du joueur (les
 ## colons ne dépassent jamais rules.max_settlers) ; renvoie le nombre réellement déplacé. La troupe se
 ## forme en priorité avec les fighters de la case : des workers ne s'y enrôlent qu'une fois ceux-ci
-## épuisés.
+## épuisés. Un village n'accueille pas de scientist. Les fighters qui quittent la troupe (garnison ou
+## workers) doivent trouver de la place parmi les habitants (voir free_room).
 func transfer(player_id: int, cell: Vector2i, from_role: String, to_role: String, amount: int = 1) -> int:
-	if not can_command(player_id, cell):
+	if not can_command(player_id, cell) or (to_role == "scientist" and not is_city(cell)):
 		return 0
 	var cell_population := population(cell)
 	if to_role == Population.ARMY:
 		amount = mini(amount, rules.max_army - cell_population.army)
 	if to_role == Population.SETTLER:
 		amount = mini(amount, rules.max_settlers - cell_population.settlers)
+	# Les fighters qui quittent la troupe redeviennent des habitants : il leur faut de la place.
+	if from_role == Population.ARMY and to_role != Population.ARMY:
+		amount = mini(amount, free_room(cell))
 	var moved := 0
 	if to_role == Population.ARMY and from_role == "worker":
 		moved = cell_population.transfer("fighter", to_role, amount)
@@ -523,8 +645,8 @@ func incoming(player_id: int, cell: Vector2i, army: bool) -> int:
 
 ## Colons et troupes en route avancent de `seconds` (appelé toutes les rules.starvation_interval
 ## secondes) ; au bout de rules.travel_time, ils arrivent (voir _settle et _deploy). Ceux qui ne
-## peuvent pas s'installer rentrent dans leur case de départ, comme colons ou comme troupe, dans la
-## limite de sa place (et de rules.max_settlers ou rules.max_army) ; ceux qui ne peuvent pas rentrer
+## peuvent pas s'installer rentrent dans leur case de départ, comme colons (dans la limite de sa place et
+## de rules.max_settlers) ou comme troupe (dans la limite de rules.max_army) ; ceux qui ne peuvent pas rentrer
 ## (case de départ perdue, assiégée ou pleine) sont perdus.
 func move_convoys(seconds: float) -> void:
 	var arrived: Array[Convoy] = []
@@ -538,7 +660,8 @@ func move_convoys(seconds: float) -> void:
 		if left > 0 and can_command(convoy.player_id, convoy.from_cell):
 			var source := population(convoy.from_cell)
 			var limit := rules.max_army - source.army if convoy.is_army else rules.max_settlers - source.settlers
-			var back := mini(left, mini(free_room(convoy.from_cell), limit))
+			var room := 1 << 30 if convoy.is_army else free_room(convoy.from_cell)
+			var back := mini(left, mini(room, limit))
 			if convoy.is_army:
 				source.army += back
 			else:
@@ -566,14 +689,14 @@ func _settle(convoy: Convoy) -> int:
 
 
 ## Troupe arrivée, selon ce qu'est devenue la case d'arrivée : chez le joueur en paix, elle reste une
-## troupe (dans la limite de la place et de rules.max_army) ; dans une de ses cases assiégées, elle en
+## troupe (dans la limite de rules.max_army, sa place à part) ; dans une de ses cases assiégées, elle en
 ## renforce la garnison ; sur une case ennemie ou en guerre, elle livre bataille. Une case devenue
 ## libre et en paix ne l'accueille pas. Renvoie les fighters qui restent.
 func _deploy(convoy: Convoy) -> int:
 	var cell := convoy.to_cell
 	var cell_owner := owner(cell)
 	if cell_owner == convoy.player_id and not is_at_war(cell):
-		var placed := mini(convoy.units, mini(free_room(cell), rules.max_army - population(cell).army))
+		var placed := mini(convoy.units, rules.max_army - population(cell).army)
 		population(cell).army += placed
 		return convoy.units - placed
 	if cell_owner == convoy.player_id:
@@ -611,9 +734,9 @@ func can_command(player_id: int, cell: Vector2i) -> bool:
 	return owner(cell) == player_id and not is_at_war(cell)
 
 
-## Places qu'offre `to_cell` à la troupe du joueur. Chez lui en paix, c'est la place libre de la case
-## (règle d'or : c'est là que se préparent les armées), dans la limite de rules.max_army pour sa troupe. Sur une case en guerre (renforts pour la
-## défendre, ou pour rejoindre la bataille, même entre deux autres joueurs) ou sur une case ennemie,
+## Places qu'offre `to_cell` à la troupe du joueur. Chez lui en paix, la troupe a sa propre place, en
+## plus de la capacité de la case : jusqu'à rules.max_army fighters, troupes en route comprises. Sur une
+## case en guerre (renforts pour la défendre, ou pour rejoindre la bataille, même entre deux autres joueurs) ou sur une case ennemie,
 ## il n'y a pas de limite ; l'excédent éventuel meurt après la bataille (voir starve). Aucune place
 ## sur une case vide en paix : on la colonise avec des colons.
 func army_room(player_id: int, to_cell: Vector2i) -> int:
@@ -623,7 +746,7 @@ func army_room(player_id: int, to_cell: Vector2i) -> int:
 		return UNLIMITED
 	if target_owner == NO_PLAYER:
 		return 0
-	return mini(free_room(to_cell), rules.max_army - population(to_cell).army - incoming(player_id, to_cell, true))
+	return rules.max_army - population(to_cell).army - incoming(player_id, to_cell, true)
 
 
 ## Cases où peut partir la troupe de `cell`, si elle appartient au joueur : voisines qui sont à lui
@@ -700,6 +823,9 @@ func _fight_battles() -> void:
 		var survivors := current.fighters.keys()
 		if survivors.is_empty():
 			_battles.erase(cell)
+			if defenders == null:
+				# Plus personne : la ville tombe en ruine.
+				_cities.erase(cell)
 		elif defenders == null and survivors.size() == 1:
 			var winner_id: int = survivors[0]
 			_populations[cell] = Population.new(winner_id, {"fighter": float(current.fighters[winner_id])})
@@ -727,6 +853,17 @@ func defender_strength(cell: Vector2i) -> float:
 ## Multiplicateur de la force du défenseur de `cell` : rules.mountain_defense en montagne, 1 sinon.
 func defense_bonus(cell: Vector2i) -> float:
 	return rules.mountain_defense if terrain(cell) == Terrain.Type.MOUNTAIN else 1.0
+
+
+## Multiplicateur de la force de la garnison de `cell` dû à ses remparts : rules.megapolis_defense dans une
+## mégapole, 1 sinon.
+func walls_bonus(cell: Vector2i) -> float:
+	return rules.megapolis_defense if is_megapolis(cell) else 1.0
+
+
+## Multiplicateur total de la force d'un fighter de la garnison de `cell` : terrain et remparts.
+func garrison_bonus(cell: Vector2i) -> float:
+	return defense_bonus(cell) * walls_bonus(cell)
 
 
 ## Multiplicateur des pertes d'un camp de force `own` face à un camp de force `enemy` : le rapport
@@ -770,12 +907,12 @@ func _lose_fraction(defenders: Population, role: String, exchanges: float, per_e
 
 
 ## Survivants d'une armée de `army` fighters qui attaque seule une garnison de `garrison` fighters sur
-## `cell` (terrain compris), selon les règles de bataille ; 0 si elle ne l'emporte pas. Sert aux IA à
+## `cell` (terrain et remparts compris), selon les règles de bataille ; 0 si elle ne l'emporte pas. Sert aux IA à
 ## estimer une attaque.
 func assault_survivors(army: int, garrison: int, cell: Vector2i) -> int:
 	var attack := float(army)
 	var defense := float(garrison)
-	var bonus := defense_bonus(cell)
+	var bonus := garrison_bonus(cell)
 	while attack >= 1.0 - 1e-6 and defense >= 1.0 - 1e-6:
 		var attack_strength := floorf(attack + 1e-6) * rules.army_strength
 		var defense_strength := floorf(defense + 1e-6) * rules.garrison_strength * bonus

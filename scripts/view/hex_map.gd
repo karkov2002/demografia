@@ -46,6 +46,8 @@ var world: World:
 		world = value
 		world.changed.connect(queue_redraw)
 		world.owner_changed.connect(_on_owner_changed)
+		world.city_founded.connect(_on_city_founded)
+		world.city_lost.connect(_on_city_lost)
 		_update_layout()
 ## Case sélectionnée, ou NO_CELL.
 var selected_cell: Vector2i = NO_CELL
@@ -166,6 +168,10 @@ func _draw() -> void:
 			var icon_size := Vector2.ONE * _hex_radius * 0.7
 			var icon_center := cell_center(cell) + Vector2(0.0, _hex_radius * 0.5)
 			draw_texture_rect(Icons.STARVATION, Rect2(icon_center - icon_size / 2.0, icon_size), false)
+	# Flèche qui sautille sur les villages pleins du joueur, qui peuvent passer en ville.
+	for cell in world.cells_of(viewer_id):
+		if world.can_found_city(viewer_id, cell):
+			_draw_upgrade_arrow(cell_center(cell) + Vector2(_hex_radius * 0.45, -_hex_radius * 0.3), now)
 	_draw_battles()
 	# Cibles de la case sélectionnée : chariot où ses colons peuvent partir ; pour sa troupe, flèche de
 	# déplacement vers une case du joueur et épée vers une case ennemie à attaquer (côte à côte quand
@@ -205,6 +211,20 @@ func _on_owner_changed(cell: Vector2i, previous_owner: int, new_owner: int, by_w
 		_effects.add(MapEffects.Kind.VICTORY, cell)
 	elif previous_owner == viewer_id:
 		_effects.add(MapEffects.Kind.DEFEAT, cell)
+
+
+## Ville fondée par le joueur : feux d'artifice et picto de la ville à sa couleur.
+func _on_city_founded(cell: Vector2i) -> void:
+	if world.owner(cell) == viewer_id:
+		_effects.add(MapEffects.Kind.CITY, cell, CellBackground.PLAYER_COLORS[viewer_id])
+
+
+## Ville du joueur redevenue village : picto du village à sa couleur sur une pluie de braises, avec
+## « VILLE AFFAMÉE » si c'est la famine.
+func _on_city_lost(cell: Vector2i, by_famine: bool) -> void:
+	if world.owner(cell) == viewer_id:
+		_effects.add(MapEffects.Kind.VILLAGE, cell, CellBackground.PLAYER_COLORS[viewer_id],
+				"VILLE AFFAMÉE" if by_famine else "")
 
 
 ## Ondes sur la frontière du joueur : un front lumineux, cercle qui grandit depuis la case d'où part
@@ -391,3 +411,20 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 			cell_selected.emit(cell)
 			accept_event()
+
+
+## Petite flèche « up » dorée centrée sur `center`, cernée de sombre, qui sautille et luit doucement :
+## le village peut passer en ville.
+func _draw_upgrade_arrow(center: Vector2, now: float) -> void:
+	const COLOR := Color("ffd84a")
+	var size := _hex_radius * 0.28
+	var bounce := absf(sin(now * TAU * 0.8))
+	center.y -= bounce * size * 0.35
+	var points := PackedVector2Array()
+	for point in [Vector2(0.0, -0.5), Vector2(0.5, 0.05), Vector2(0.2, 0.05), Vector2(0.2, 0.5),
+			Vector2(-0.2, 0.5), Vector2(-0.2, 0.05), Vector2(-0.5, 0.05)]:
+		points.append(center + point * size)
+	draw_circle(center, size * (0.75 + 0.1 * bounce), Color(COLOR, 0.18 + 0.12 * bounce))
+	draw_colored_polygon(points, COLOR.lerp(Color.WHITE, 0.3 * bounce))
+	points.append(points[0])
+	draw_polyline(points, PopulationText.OUTLINE_COLOR, maxf(1.5, size * 0.1), true)

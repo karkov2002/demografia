@@ -39,9 +39,9 @@ const SCIENCE := preload("res://assets/icons/science.png")
 const POPULATION := preload("res://assets/icons/population.png")
 ## Même buste en niveaux de gris, à teinter à la couleur d'un joueur.
 const POPULATION_TINT := preload("res://assets/icons/population_tint.png")
-## Agglomération d'une case selon son remplissage (population totale ÷ capacité) et l'époque, en niveaux
-## de gris à teinter à la couleur de son propriétaire : village jusqu'au premier seuil, ville jusqu'au
-## second, mégapole au-delà. Chaque époque (qui avancera avec la science) aura ses trois images.
+## Agglomération d'une case selon son statut, son remplissage et l'époque, en niveaux de gris à teinter
+## à la couleur de son propriétaire : village, ville, puis mégapole (voir
+## World.is_megapolis). Chaque époque (qui avancera avec la science) aura ses trois images.
 const SETTLEMENTS := {
 	"antiquity": [
 		preload("res://assets/icons/settlement_antiquity_village.png"),
@@ -49,7 +49,6 @@ const SETTLEMENTS := {
 		preload("res://assets/icons/settlement_antiquity_megapolis.png"),
 	],
 }
-const SETTLEMENT_THRESHOLDS := [1.0 / 3.0, 2.0 / 3.0]
 const GOLD := preload("res://assets/icons/gold.png")
 const FOOD := preload("res://assets/icons/food.png")
 ## Alerte de famine.
@@ -110,17 +109,19 @@ static func trend(change: float) -> Texture2D:
 	return TREND_FLAT
 
 
-## Palier d'agglomération d'une case remplie à `fill` (population totale ÷ capacité, de 0 à 1) :
-## 0 = village, 1 = ville, 2 = mégapole.
-static func settlement_tier(fill: float) -> int:
-	var tier := 0
-	for threshold in SETTLEMENT_THRESHOLDS:
-		if fill >= threshold:
-			tier += 1
-	return tier
+## Palier d'agglomération de `cell` : 0 = village, 1 = ville, 2 = mégapole (voir World.is_megapolis).
+static func settlement_tier(world: World, cell: Vector2i) -> int:
+	if not world.is_city(cell):
+		return 0
+	return 2 if world.is_megapolis(cell) else 1
 
 
-## Petite icône de l'agglomération (village, ville ou mégapole de l'époque `era`) d'une case remplie à
-## `fill`, pour les lignes d'information (zoom, belligérants).
-static func settlement(fill: float, era: String = "antiquity") -> Texture2D:
-	return SETTLEMENTS[era][settlement_tier(fill)]
+## Petite icône de l'agglomération de `cell` (voir settlement_tier), pour les lignes d'information
+## (zoom, belligérants).
+static func settlement(world: World, cell: Vector2i, era: String = "antiquity") -> Texture2D:
+	return settlement_icon(settlement_tier(world, cell), era)
+
+
+## Petite icône du palier d'agglomération `tier` (0 = village, 1 = ville, 2 = mégapole).
+static func settlement_icon(tier: int, era: String = "antiquity") -> Texture2D:
+	return SETTLEMENTS[era][tier]

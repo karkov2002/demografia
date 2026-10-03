@@ -35,6 +35,12 @@ func total() -> float:
 	return sum
 
 
+## Habitants de la case : tous sauf la troupe, qui a sa propre place (rules.max_army) en plus de la
+## capacité de la case. Ce sont eux que limite la règle d'or et qui freinent la croissance.
+func residents() -> float:
+	return total() - army
+
+
 ## Nombre entier d'individus, tous rôles, colons et troupe compris, celui qu'affiche le jeu.
 func whole_total() -> int:
 	var sum := settlers + army
@@ -98,12 +104,16 @@ func _add(role: String, amount: int) -> void:
 
 ## Croissance logistique (courbe en S) : l'accroissement de chaque rôle donné par `rates` (rôle →
 ## multiplicateur dans une case vide) est freiné par la place déjà prise, multiplié par
-## (1 − population totale ÷ `capacity`). Lente au début (peu d'individus), la croissance accélère, puis
-## ralentit à l'approche de la capacité, qu'elle n'atteint qu'en un temps infini. La règle d'or reste
+## (1 − habitants ÷ `capacity`), la troupe n'en faisant pas partie (voir residents). Lente au début (peu
+## d'individus), la croissance accélère, puis ralentit à l'approche de la capacité, qu'elle n'atteint
+## qu'en un temps infini. La règle d'or reste
 ## garantie : si la place manquait tout de même, elle serait partagée au prorata de la croissance.
-## Un rôle sans au moins un individu entier ne se reproduit pas.
-func grow(rates: Dictionary[String, float], capacity: float) -> void:
+## Un rôle sans au moins un individu entier ne se reproduit pas. Si `limit` est positif (un village),
+## la croissance, freinée selon `capacity` comme ailleurs, s'arrête net à `limit` individus.
+func grow(rates: Dictionary[String, float], capacity: float, limit: float = 0.0) -> void:
 	var brake := _brake(capacity)
+	if limit > 0.0:
+		capacity = minf(capacity, limit)
 	var growth: Dictionary[String, float] = {}
 	var total_growth := 0.0
 	for role in counts:
@@ -111,7 +121,7 @@ func grow(rates: Dictionary[String, float], capacity: float) -> void:
 		total_growth += growth[role]
 	if total_growth <= 0.0:
 		return
-	var ratio := minf(1.0, maxf(0.0, capacity - total()) / total_growth)
+	var ratio := minf(1.0, maxf(0.0, capacity - residents()) / total_growth)
 	for role in counts:
 		counts[role] += growth[role] * ratio
 
@@ -119,9 +129,12 @@ func grow(rates: Dictionary[String, float], capacity: float) -> void:
 ## Avancement (0 à 1) de chaque rôle vers sa prochaine unité, en temps : la croissance est
 ## supposée continue entre deux cycles, `cycle_fraction` étant la part écoulée du cycle en cours.
 ## Les rôles qui ne se reproduisent jamais (taux ≤ 1) sont absents du résultat ; 0 pour un rôle
-## bloqué pour l'instant (aucun individu entier, case pleine).
-func progress(rates: Dictionary[String, float], capacity: float, cycle_fraction: float) -> Dictionary[String, float]:
+## bloqué pour l'instant (aucun individu entier, case pleine, village plein selon `limit` : voir grow).
+func progress(rates: Dictionary[String, float], capacity: float, cycle_fraction: float,
+		limit: float = 0.0) -> Dictionary[String, float]:
 	var brake := _brake(capacity)
+	if limit > 0.0 and residents() >= limit - 1e-6:
+		brake = 0.0
 	var result: Dictionary[String, float] = {}
 	for role in counts:
 		var rate: float = rates.get(role, 1.0)
@@ -141,7 +154,7 @@ func progress(rates: Dictionary[String, float], capacity: float, cycle_fraction:
 
 ## Frein de la courbe en S : 1 dans une case vide, 0 dans une case pleine.
 func _brake(capacity: float) -> float:
-	return clampf(1.0 - total() / capacity, 0.0, 1.0) if capacity > 0.0 else 0.0
+	return clampf(1.0 - residents() / capacity, 0.0, 1.0) if capacity > 0.0 else 0.0
 
 
 ## Il faut au moins un individu entier pour qu'un rôle se reproduise.

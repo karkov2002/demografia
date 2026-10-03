@@ -49,11 +49,63 @@ La famine et le surpeuplement tournent sur leur propre horloge, toutes les 0,1 s
 | `capacity[PRAIRIE]` | **1024** | `GameRules` | Règle d'or : population maximale d'une case. |
 | `capacity[MOUNTAIN]` | **256** | `GameRules` | Idem. |
 | `capacity[WATER]` | **0** | `GameRules` | Inhabitable. |
+| `village_capacity` | **256** | `GameRules` | Population maximale d'un village (voir « Villages et villes »). |
+| `city_growth_factor` | **0,5** | `GameRules` | Multiplie l'accroissement par cycle d'une ville : elle grandit plus lentement qu'un village. |
+| `megapolis_threshold` | **2/3** | `GameRules` | Remplissage (habitants ÷ capacité du terrain) à partir duquel une ville est une mégapole. |
+| `megapolis_defense` | **×1,5** | `GameRules` | Remparts : multiplie la force de la garnison d'une mégapole. |
 | `starting_population` | **2 workers**, 0 scientist, 0 garnison | `GameRules` | Population posée sur la case de départ. |
 | Joueurs | **2 à 4** | fenêtre « Nouvelle partie » | Le joueur 1 est l'humain, les autres des IA pacifistes, normales ou agressives (normale par défaut). |
 
-**Règle d'or.** La population totale d'une case ne dépasse jamais sa capacité. Ce total compte tous
-les rôles, les colons en attente et l'armée. Il y a une seule exception, les batailles (voir §8).
+**Règle d'or.** Les habitants d'une case ne dépassent jamais sa capacité. Ils comprennent tous les
+rôles et les colons en attente, mais **pas l'armée** (depuis le 03/10) : elle a sa propre place, en plus,
+jusqu'à `max_army` (1024), dans un village comme dans une ville. Il y a une seule exception, les
+batailles (voir §8). La
+capacité d'un **village** est plafonnée à 256 (`village_capacity`) ; celle d'une **ville** est celle
+de son terrain (1024 en prairie, 256 en montagne).
+
+**Villages et villes (depuis le 03/10).** Toute case peuplée est d'abord un **village**. Sa population
+grandit selon la même courbe en S qu'avant (freinée par la capacité du terrain, voir §3), mais
+**s'arrête net à 256**. Une fois le village plein, le bouton **« Progress to city »** apparaît dans le
+zoom, à la place des scientists, et une petite **flèche « up »** dorée sautille sur la case, sur la
+carte. Un clic sur le bouton fait passer la case en **ville** : sa population reprend sa progression
+jusqu'à 1024, deux fois plus lentement qu'un village (`city_growth_factor`). Les deux statuts se
+complètent :
+
+| | Village | Ville |
+|---|---|---|
+| Habitants au maximum | 256 | capacité du terrain (1024 en prairie) |
+| Croissance | courbe en S normale | accroissement ×0,5 |
+| Food | ses workers en produisent (3 chacun) ; chacun mange 1 | **aucune production** ; chaque citadin mange **3** : elle doit être nourrie par ses voisines |
+| Or par worker | +2 | **+3** |
+| Scientists | **aucun** (le « + » des scientists n'existe pas) | oui, c'est là que se fait la science |
+| Défense | normale | mégapole (≥ 2/3 de la capacité du terrain) : **remparts**, garnison ×1,5 |
+
+On obtient ainsi une civilisation réaliste : des zones agricoles (villages) entourent des zones
+urbaines denses (villes) qui concentrent la science, l'or et la population. **Chaque village plein
+nourrit 1/6 d'une ville** : il en faut 6 pour une ville de 1024 (voir §4). Les autres règles
+(garnison, armée, colons, Boost, batailles) sont les mêmes dans les deux cas.
+
+- **Downgrade to village.** Dans le zoom d'une ville en paix, un gros bouton « Downgrade to village »
+  (sous Boost) la fait redevenir village, après confirmation (le jeu continue pendant la question). Ses
+  scientists redeviennent workers, puis les habitants au-delà de 256 disparaissent : des workers
+  d'abord, puis la garnison, puis les colons. L'armée, qui a sa propre place, reste entière. Sur un village, la place du bouton reste vide pour que
+  les autres boutons ne bougent pas.
+- **Famine.** Une ville affamée dont les habitants retombent à **256 ou moins** sous l'effet de la
+  famine redevient automatiquement un village (ses scientists restants redeviennent workers). Ses
+  workers produisent de nouveau de la food, ce qui arrête la famine. Pour la refaire ville, il faut
+  recliquer sur « Progress to city ». Une ville qui descend sous 256 autrement (bataille) reste une
+  ville. Conséquence : une ville fondée sans voisines pour la nourrir (256 citadins mangent 768 et elle
+  ne produit rien) redevient village au premier mort de faim, soit environ 1,1 s plus tard. Il faut au
+  moins 2 villages pleins autour pour qu'une ville tienne (§4).
+- **Ville prise.** Le statut de ville reste attaché à la case : une ville conquise reste une ville
+  pour son vainqueur. Elle ne redevient libre (et village à la prochaine colonisation) que si la
+  bataille la laisse vide.
+- **Montagne.** Sa capacité (256) est déjà celle d'un village ; la courbe en S n'y atteint jamais 256
+  toute seule, il faut quelques clics de Boost pour remplir le village. Passée en ville, elle ne grandit
+  pas plus, mais peut accueillir des scientists.
+- **Commandes.** Le passage en ville (`FoundCityCommand`) et le retour au village
+  (`DowngradeCityCommand`) sont des commandes, comme les autres actions, pour l'humain comme pour
+  l'IA. Le premier n'est possible que sur un village plein, en paix ; le second sur une ville en paix.
 
 **Départ.** Le joueur humain choisit sa case de départ (jamais sur l'eau). Chaque IA tire ensuite la
 sienne au hasard parmi les cases libres hors de l'eau. La génération de la carte garde toujours au
@@ -66,13 +118,14 @@ joueurs engagés dans une bataille sur la case.
 
 **Agglomérations et population sur la carte.** Chaque case occupée et en vue, celles du joueur comme
 les cases ennemies, montre son agglomération, dessinée sur la tuile, et sa population totale en
-dessous. Le type d'agglomération dépend du remplissage (population totale ÷ capacité) :
+dessous. Le type d'agglomération dépend du statut de la case et, pour une ville, de son remplissage
+(population totale ÷ capacité du terrain) :
 
-| Remplissage | Agglomération (antiquité) | Prairie (1024) | Montagne (256) |
+| Statut et remplissage | Agglomération (antiquité) | Prairie (1024) | Montagne (256) |
 |---|---|---|---|
-| moins d'un tiers | **village** : trois huttes au toit de chaume | < 341 | < 85 |
-| d'un tiers aux deux tiers | **ville** : temple grec entouré de maisons | 341 à 682 | 85 à 170 |
-| au-delà | **mégapole** : cité ceinte d'un rempart, avec grand temple, tour de guet et maisons serrées | ≥ 683 | ≥ 171 |
+| village | **village** : trois huttes au toit de chaume | ≤ 256 | ≤ 256 |
+| ville, jusqu'aux deux tiers | **ville** : temple grec entouré de maisons | < 683 | < 171 |
+| ville, au-delà | **mégapole** : cité ceinte d'un rempart, avec grand temple, tour de guet et maisons serrées | ≥ 683 | ≥ 171 |
 
 - **Intégration au décor.** Les agglomérations sont en pixel art vu de trois quarts, au format des
   tuiles (42×48), donc à la même échelle de pixels que le terrain. La lumière vient d'en haut à gauche
@@ -91,7 +144,7 @@ dessous. Le type d'agglomération dépend du remplissage (population totale ÷ c
 **Couleur des cases.** Chaque case occupée et en vue porte un voile uni à la couleur de son
 propriétaire, quelle que soit sa composition. Son opacité suit le remplissage de la case :
 
-    opacité = 0,8 × population totale ÷ capacité de la case
+    opacité = 0,8 × population totale ÷ capacité du terrain de la case (celle d'une ville)
 
 Une case pleine est donc bien colorée, une case qui vient d'être fondée à peine teintée. Une montagne
 de 128 habitants (capacité 256) est aussi colorée qu'une prairie de 512. La règle vaut pour les cases
@@ -106,6 +159,13 @@ ennemies, dont la population totale est de toute façon affichée. Le maximum 0,
   le titre « DÉFAITE », sur une pluie de braises et une fumée sombre.
 - **Terre conquise.** Quand ses colons fondent une nouvelle case, un drapeau planté surgit avec le
   titre « TERRE CONQUISE », une onde à la couleur du joueur et des étincelles vertes et dorées.
+- **Ville fondée.** Quand le joueur fait passer un village en ville, l'icône de la ville, à sa couleur,
+  surgit avec le titre « VILLE FONDÉE » sur des feux d'artifice.
+- **Retour au village.** Quand une ville du joueur redevient village, l'icône du village, à sa
+  couleur, surgit sur une pluie de braises avec le titre « RETOUR AU VILLAGE », ou « VILLE AFFAMÉE »
+  si c'est la famine.
+- **Flèche « up ».** Sur chaque village plein du joueur qui peut passer en ville, une petite flèche
+  dorée sautille et luit en haut à droite de la case.
 - **Flash de conquête.** Toute case en vue qui change de main par la guerre s'illumine d'un éclair
   blanc, avec une onde à la couleur de son nouveau propriétaire (rouge si elle devient libre).
 - **Onde sur la frontière.** Quand le territoire du joueur s'agrandit, par colonisation ou conquête,
@@ -116,8 +176,9 @@ ennemies, dont la population totale est de toute façon affichée. Le maximum 0,
 - **Découverte.** Une case qui vient d'être découverte sort du brouillard en fondu, en 0,8 s
   (`REVEAL_TIME`), avec un léger éclat.
 
-Ces effets sont purement visuels. Ils suivent le signal `World.owner_changed`, émis quand une case
-change de propriétaire.
+Ces effets sont purement visuels. Ils suivent les signaux `World.owner_changed`, émis quand une case
+change de propriétaire, et `World.city_founded`, émis quand un village passe en ville, et `World.city_lost`, émis quand une ville
+redevient village.
 
 **Sons** (`scripts/view/sound_fx.gd`, sons CC0 de Kenney et OpenGameArt, crédits dans
 `assets/sounds/CREDITS.md`). Chaque bruitage mêle plusieurs sons, avec des instants, volumes et
@@ -127,11 +188,13 @@ hauteurs un peu tirés au hasard, pour ne jamais sonner pareil :
 - **Chariot** : quand ses colons partent, un grincement puis les cahots des roues pendant le trajet.
 - **Victoire** : quand il gagne une case par la guerre, une clameur de foule de 2,6 s, prise à un endroit
   différent de l'enregistrement à chaque fois.
+- **Ville fondée** : une clameur de foule plus légère et plus aiguë que celle de la victoire.
 - **Défaite** : quand il perd une case par la guerre, un choc sourd, puis la même foule plus grave et
-  plus lente, comme consternée.
+  plus lente, comme consternée. Le même son accompagne une ville du joueur qui redevient village
+  à cause de la famine.
 - **Clic** : un petit clic sur tous les boutons. Ce sont les boutons du menu, des fenêtres et du jeu,
-  accrochés automatiquement, ainsi que les boutons dessinés du zoom : « + », « − », Settler, Army et
-  raccourcis.
+  accrochés automatiquement, ainsi que les boutons dessinés du zoom : « + », « − », Settler, Army,
+  raccourcis, « Progress to city » et « Downgrade to village ».
 - **Boost** : un petit tir laser à chaque clic réussi, un peu plus aigu ou grave à chaque fois.
 
 **Musique de fond** (`scripts/view/background_music.gd`, musiques CC0, crédits dans
@@ -176,11 +239,17 @@ déjà prise :
     frein = 1 − population totale de la case ÷ capacité      1 case vide, 0 case pleine
     effectif ← effectif × (1 + (taux − 1) × frein)
 
-Le frein compte toute la population de la case, colons et armée compris. Une montagne (256) freine
-donc quatre fois plus tôt qu'une prairie. La croissance est continue (effectifs flottants), mais un
+Le frein compte tous les habitants de la case, colons compris. Une montagne (256) freine
+donc quatre fois plus tôt qu'une prairie. Le frein utilise toujours la capacité du **terrain** : dans un village,
+la croissance garde la vitesse de cette courbe, puis s'arrête net à 256 (`village_capacity`).
+Passée en ville, la case reprend la courbe là où elle en était, à mi-vitesse. L'armée ne compte pas
+dans le frein (elle a sa propre place). La croissance est continue (effectifs flottants), mais un
 rôle ne grandit que s'il compte au moins **un individu entier**.
 
-Valeurs *(calculé, vérifié en simulation)* : un worker seul sur une prairie, sans Boost.
+Valeurs *(calculé, vérifié en simulation)* : un worker seul sur une prairie, sans Boost. Ce tableau
+décrit la courbe en S seule. Dans le jeu, un village s'arrête à 256 (3 min 43 depuis 2 workers) ;
+passée en ville aussitôt, la case met encore **4 min 46** pour atteindre 90 % (922), car une ville
+grandit deux fois moins vite (`city_growth_factor` = 0,5 sur l'accroissement).
 
 | Population | Depuis 1 worker | Depuis 2 workers (départ) |
 |---|---|---|
@@ -204,7 +273,8 @@ Cliquer frénétiquement fait partie du jeu. L'IA utilise Boost aussi, à un ryt
 son niveau (voir §9).
 
 **Changements de rôle.** Les boutons « + » et « − » du zoom échangent un individu entre les workers
-et les scientists, ou entre les workers et la garnison. Les boutons Settler et Army font de même avec
+et les scientists, ou entre les workers et la garnison. Dans un village, la ligne des scientists est remplacée
+par « Village : population / 256 », puis par le bouton « Progress to city » quand il est plein. Les boutons Settler et Army font de même avec
 les colons et l'armée (clic gauche pour remplir, clic droit pour vider). Maintenir un bouton accélère :
 un individu de plus au bout de **0,4 s** (`hold_delay`), puis 0,4/2 s, 0,4/3 s, etc., jusqu'à **500 par
 seconde** (`max_hold_rate`), deux réglages de `GameRules` : c'est la vitesse à laquelle un humain peut
@@ -217,23 +287,46 @@ on atteint 10 par seconde en ≈ 0,8 s et 500 par seconde en ≈ 2,4 s. Aucune c
 
 | Variable | Valeur | Rôle |
 |---|---|---|
-| `food_per_worker` | **3** | Food produite par worker et par cycle. |
-| `food_per_individual` | **1** | Food mangée par worker, scientist ou fighter de garnison, par cycle. |
+| `food_per_worker` | **3** | Food produite par worker **d'un village** et par cycle (0 dans une ville). |
+| `food_per_individual` | **1** | Food mangée par worker, scientist ou fighter de garnison, par cycle, dans un village. |
+| `city_food_per_individual` | **3** | Idem dans une ville : un citadin mange 3. |
+| `army_food` | **0,5** | Ration mangée par chaque fighter de l'armée d'une case, par cycle. |
 | `starvation_grace` | **1 s** | Délai de grâce avant la première mort. |
 | `starvation_interval` | **0,1 s** | Délai entre deux morts tant que la famine dure. |
 
 Formules :
 
-    solde de la case = 3 × workers − 1 × (workers + scientists + garnison)
-                     = 2 × workers − scientists − garnison
+    solde d'un village = 3 × workers − 1 × (workers + garnison) − 0,5 × armée
+                      = 2 × workers − garnison − 0,5 × armée
+    solde d'une ville   = − 3 × (workers + scientists + garnison) − 0,5 × armée
 
-- **Un worker nourrit 2 non-workers** (scientists ou fighters de garnison).
-- Les colons en attente, l'armée et les fighters engagés dans une bataille **ne mangent pas**.
-- **Partage.** Le surplus d'une case est partagé à parts égales entre ses voisines du même joueur.
-  Le partage ne se fait qu'entre voisines directes, pas au-delà.
+- **Dans un village, un worker nourrit 2 fighters de garnison.** Un village plein de 256 workers a un
+  surplus de **512** par cycle.
+- **Une ville ne produit rien** et chaque citadin, workers compris, mange **3** par cycle. Une ville
+  pleine (1024) a besoin de **3072 food** par cycle, soit exactement le surplus de 6 villages pleins.
+- **Partage prioritaire (depuis le 03/10).** Le surplus d'une case va **uniquement aux voisines du même
+  joueur qui manquent de food** (solde négatif), en proportion de leur manque, sans le dépasser. Ce
+  qui reste est perdu (pas de stock). Le partage ne se fait qu'entre voisines directes, pas au-delà.
+  Les cases en guerre, figées, n'envoient ni ne reçoivent rien.
+- **Taille d'une ville selon ses villages** *(calculé et vérifié en simulation, villages pleins sans
+  garnison, qui ne nourrissent qu'elle)* : chaque village plein nourrit 512 ÷ 3 ≈ 171 citadins.
+
+  | Villages pleins autour | 1 | 2 | 3 | 4 | 5 | 6 |
+  |---|---|---|---|---|---|---|
+  | Taille maximale de la ville | redevient village | 344 | ≈ 512 | 685 | 855 | **1024** |
+
+  Le seuil est juste : une garnison dans les villages, ou un village partagé entre deux villes, et la
+  ville plafonne plus bas (6 villages avec 20 fighters de garnison chacun : 906).
+- **Armée.** L'armée d'une case mange sa ration (0,5 par fighter) sur la food de sa case, **avant** que
+  le surplus ne soit exporté. Une armée complète (1024) mange 512 : exactement le surplus d'un village
+  plein, qui n'exporte alors plus rien. Si la case n'y suffit pas, elle reçoit de ses voisines comme
+  toute case dans le besoin.
+- Les colons en attente, l'armée en route et les fighters engagés dans une bataille **ne mangent pas**.
 - **Famine.** Une case dont la food disponible (son solde plus ce qu'elle reçoit) est négative
   bénéficie de 1 s de grâce. Ensuite, elle perd **un individu toutes les 0,1 s** (10 par seconde) :
-  un scientist d'abord, puis un fighter de garnison, puis un worker, jusqu'à retrouver l'équilibre.
+  un fighter de son armée d'abord, puis un scientist, puis un fighter de garnison, puis un worker,
+  jusqu'à retrouver l'équilibre.
+  Une ville que la famine ramène à 256 habitants ou moins redevient un village (§2).
 - Une case assiégée est figée : pas de famine.
 
 ---
@@ -242,17 +335,19 @@ Formules :
 
 | Variable | Valeur | Rôle |
 |---|---|---|
-| `gold_per_role["worker"]` | **+2** | Or rapporté par worker et par cycle. |
+| `gold_per_role["worker"]` | **+2** | Or rapporté par worker et par cycle, dans un village. |
+| `city_gold_per_worker` | **+3** | Or rapporté par worker d'une ville, par cycle. |
 | `gold_per_role["scientist"]` | **−1** | Or coûté par scientist et par cycle. |
 | `gold_per_role["fighter"]` | **−1** | Or coûté par fighter de garnison et par cycle. |
 | `conversions_per_cycle` | **1** | Reconversions par cycle quand l'or est épuisé. |
 
 Formule :
 
-    revenu du joueur = Σ (2 × workers − scientists − garnison) sur toutes ses cases
+    revenu d'un village = 2 × workers − garnison
+    revenu d'une ville   = 3 × workers − scientists − garnison
 
-- **Un worker paie 2 non-workers.** C'est le même ratio que pour la food : une case de W workers
-  entretient au plus 2W scientists et fighters de garnison, en or comme en food.
+- **Un worker de village paie 2 fighters de garnison**, le même ratio que pour la food. **Un worker
+  de ville en paie 3** : les villes sont riches, mais dépendent de leurs voisines pour manger.
 - Les colons, l'armée et les fighters engagés dans une bataille **ne coûtent rien**.
 - **Faillite.** L'or ne descend jamais sous 0. S'il le devrait, **1 scientist ou fighter de
   garnison par cycle** redevient worker. La conversion se fait dans la case qui en compte le plus,
@@ -270,6 +365,9 @@ Formule :
 
     science par cycle = 0,1 × scientists (hors cases en guerre)
 
+Les scientists ne vivent que dans les **villes** : un village n'en accueille aucun (§2, « Villages et
+villes »). La science demande donc de fonder des villes, et de les nourrir.
+
 La science s'accumule mais n'a **pas encore d'effet**. Il est prévu qu'elle accélère la croissance,
 relève la capacité des cases et modifie les batailles, via un système de technologies.
 
@@ -285,7 +383,7 @@ Les fighters d'une case forment deux groupes :
 | Variable | Valeur | Rôle |
 |---|---|---|
 | `max_settlers` | **32** | Colons en attente au maximum sur une case. |
-| `max_army` | **1024** | Taille maximale de l'armée d'une case. |
+| `max_army` | **1024** | Taille maximale de l'armée d'une case : c'est sa place, en plus de la capacité de la case. |
 
 **Colons.** Des workers mis de côté. Ils partent vers une case voisine en prairie ou en montagne,
 libre ou au joueur, qui n'est pas en guerre, dans la limite de sa place libre ; le reste attend.
@@ -323,9 +421,9 @@ dans l'armée ou en garnison reste progressif, en maintenant le bouton.
 deviennent fighters. Le clic droit renvoie un fighter de l'armée en worker. L'armée part vers une
 case voisine :
 - **une case à soi en paix** : elle y **reste une armée**, prête à repartir aussitôt, ce qui rend les
-  déplacements fluides. Deux limites s'appliquent : la place libre de la case (règle d'or : c'est là
-  qu'on prépare les armées) et `max_army` pour l'armée de la case. Le reste attend dans la case de
-  départ ;
+  déplacements fluides. La seule limite est `max_army` pour l'armée de la case (sa place, en plus
+  des habitants : un village plein peut accueillir une armée complète). Le reste attend dans la case
+  de départ ;
 - **une case à soi assiégée** : renforts de la garnison, **sans limite**. La case est figée, donc son
   armée ne pourrait pas repartir, et en garnison les fighters défendent mieux (force 3 au lieu de 2) ;
 - **une case ennemie, ou toute case en guerre** (même entre deux autres joueurs) : elle rejoint la
@@ -333,22 +431,25 @@ case voisine :
 
 **Trajet de l'armée.** Comme les colons, l'armée quitte aussitôt sa case et n'arrive qu'au bout de
 `travel_time` (1 s). Une attaque ne commence donc qu'à l'arrivée.
-- **Place réservée** seulement vers une case à soi en paix : la place et la limite `max_army` y sont
-  réservées pendant le trajet.
+- **Place réservée** seulement vers une case à soi en paix : la limite `max_army` y est réservée
+  pendant le trajet.
 - **À l'arrivée**, on regarde ce qu'est devenue la case :
   - à soi en paix : l'armée y reste une armée ;
   - à soi assiégée : elle renforce la garnison ;
   - ennemie ou en guerre : elle livre bataille ;
   - devenue libre et en paix, ou sans place : elle rentre dans sa case de départ comme armée, dans la
-    limite de sa place et de `max_army`. Ce qui ne peut pas rentrer est perdu.
+    limite de `max_army`. Ce qui ne peut pas rentrer est perdu.
 - Les fighters en route comptent dans la population du joueur (élimination, §10).
 - **Animation.** Un petit soldat qui marche, tourné vers sa destination, fait le même trajet en fondu
   que le chariot des colons.
 - **IA.** Elle tient compte de ses troupes et colons en route : elle ne renvoie pas de renforts déjà
   en chemin, ne relance pas une attaque déjà en route, et ne colonise pas deux fois la même case.
 
-Les colons et l'armée en attente comptent dans la capacité de la case. Si la case est attaquée, son
-armée la défend aussi, une fois la garnison tombée. Les colons, eux, ne la défendent pas.
+Les colons en attente comptent dans la capacité de la case ; **l'armée non** : elle a sa propre place,
+jusqu'à `max_army`, mais elle mange sa ration (0,5 par fighter, §4). Quand des fighters quittent
+l'armée (vers la garnison ou en redevenant workers), ils redeviennent des habitants : il leur faut de
+la place libre dans la case. Si la case est attaquée, son armée la défend aussi, une fois la garnison
+tombée. Les colons, eux, ne la défendent pas.
 
 ---
 
@@ -363,6 +464,7 @@ armée la défend aussi, une fois la garnison tombée. Les colons, eux, ne la d�
 | `army_strength` | **2** | Force d'un fighter d'armée (armée du défenseur ou fighters d'un attaquant). |
 | `worker_strength` | **0,25** | Force d'un worker : quatre civils valent un soldat, ils pèsent peu face à une armée. |
 | `mountain_defense` | **×2** | Multiplie la force d'un défenseur en montagne. |
+| `megapolis_defense` | **×1,5** | Remparts : multiplie la force de la garnison d'une mégapole (cumulable avec la montagne). |
 | `force_ratio_exponent` | **1,5** | Exposant du rapport des forces : plus il est grand, plus une nette supériorité écrase vite l'adversaire (1 = rapport simple). |
 
 **Mêlée générale.** Les camps sont le défenseur (le propriétaire, avec toute sa population) et
@@ -381,7 +483,7 @@ Entre deux attaquants, les pertes habituelles sont de 1 fighter chacun par écha
 
 **Rapport des forces.** Au début de chaque cycle, on calcule la force de chaque camp :
 
-    force du défenseur = (3 × garnison + 2 × armée + 0,25 × workers) × 2 s'il est en montagne
+    force du défenseur = (3 × garnison × 1,5 si mégapole + 2 × armée + 0,25 × workers) × 2 s'il est en montagne
     force d'un attaquant = 2 × ses fighters engagés
 
 Les scientists et les colons ne comptent pas. Une force inférieure à 1 compte pour 1. Dans chaque
@@ -424,8 +526,8 @@ Déroulement :
 
 **Surpeuplement.** Après une bataille, une case peut dépasser sa capacité. Elle bénéficie alors de
 **1 s de grâce** (`starvation_grace`), puis perd **un fighter de garnison toutes les 0,1 s**
-(`starvation_interval`), ou à défaut un fighter de son armée, jusqu'à revenir à sa capacité. Les
-workers et les scientists sont épargnés. Ces morts s'ajoutent à celles de la famine et de la faillite.
+(`starvation_interval`), jusqu'à revenir à sa capacité. L'armée (qui a sa propre place), les workers
+et les scientists sont épargnés. Ces morts s'ajoutent à celles de la famine et de la faillite.
 
 **Exemples *(vérifiés en simulation, un seul attaquant, prairie)*.** Avec l'exposant 1,5, comparé à
 l'exposant 1 (la règle d'avant le 28/09) :
@@ -478,9 +580,10 @@ les commandes d'un joueur humain, avec les mêmes limites.
 | `boost_burst_seconds` | **2 s** | **4 s** | **3 s** | Durée moyenne d'une rafale. |
 | `boost_pause_seconds` | **8 s** | **8,5 s** | **5 s** | Durée moyenne d'une pause entre deux rafales. |
 | Boost moyen *(calculé)* | ≈ **0,4 clic/s** | ≈ **0,8 clic/s** | ≈ **1,5 clic/s** | |
-| `settle_fill_ratio` | **30 %** | **20 %** | **15 %** | Remplissage d'une case à partir duquel elle envoie des colons. |
+| `settle_fill_ratio` | **22 %** | **20 %** | **15 %** | Remplissage d'une case, rapporté à la capacité de son **terrain** (225, 205 et 154 en prairie : moins qu'un village plein), à partir duquel elle envoie des colons. |
 | `settlers_per_wave` | **32** | **16** | **12** | Colons envoyés à chaque vague. |
-| `science_ratio` | **40 %** | **15 %** | **5 %** | Part de la population de chaque case en scientists. |
+| `city_food_margin` | **×1,2** | **×1,2** | **×1,2** | Un village plein ne passe en ville que si ses voisines peuvent nourrir la ville qu'il deviendrait, avec cette marge. |
+| `science_ratio` | **40 %** | **15 %** | **5 %** | Part de la population de chaque **ville** en scientists. |
 | `garrison_ratio` | **75 %** | **40 %** | **25 %** | Garnison d'une case frontalière, en part de la plus grosse population ennemie voisine. |
 | `attack_margin` | **0** (jamais) | **×2** | **×1,3** | Marge au-dessus de la plus petite armée qui vaincrait le pire cas. |
 | `attack_delay` | — | **60 s** | **20 s** | Temps de réaction : durée minimale pendant laquelle une case ennemie doit être en vue avant d'être attaquée. |
@@ -517,18 +620,27 @@ rafale et de pause (`boost_phase_jitter`).
    aléa) avant la suivante. Quand elle peut agir, l'ordre de priorité est : secours, puis attaque, puis
    colonisation. Comme un humain, elle ne peut ni envoyer des renforts de plusieurs cases à la fois,
    ni coloniser plusieurs cases en même temps.
-3. **Scientists et garnison.** Dans chaque case en paix, elle ajuste ses scientists puis sa garnison
-   aux cibles du profil, en convertissant des workers dans un sens ou dans l'autre. Les deux restent
-   dans un budget qui garde l'or et la food positifs, avec 10 % de marge (`budget_share`) :
+3. **Villes.** Chaque village plein, en paix, passe en ville si ses voisines pourraient la nourrir :
+   elle estime ce que chacune lui enverrait selon le partage prioritaire (§4), en tenant compte de
+   leurs autres voisines dans le besoin, et exige 1,2 fois la consommation de la ville à 256 citadins
+   (`city_food_margin`). En pratique, il lui faut au moins 2 villages pleins autour. Comme la garnison et la science, c'est un simple bouton du
+   zoom, pas une action sur la carte. Elle ne rétrograde jamais une ville volontairement.
+   Une ville que la famine a refait village sera refondée une fois le village de nouveau plein.
+4. **Scientists et garnison.** Dans chaque case en paix, elle ajuste ses scientists (dans ses villes
+   seulement) puis sa garnison aux cibles du profil, en convertissant des workers dans un sens ou dans
+   l'autre. Les deux restent dans un budget qui garde l'or et la food positifs, avec 10 % de marge
+   (`budget_share`) :
 
        scientists + garnison ≤ 1,8 × workers   (soit au plus ≈ 64 % de la population de la case)
 
-   La science est servie d'abord, la garnison prend le reste du budget.
-4. **Colonisation**, s'il est temps d'agir (voir plus haut). Parmi ses cases en paix remplies
+   Dans une ville, seul l'or compte (ses voisines la nourrissent, quel que soit le rôle de ses
+   habitants) : un worker de ville paie 3 non-workers, la limite est donc plus haute. La science est servie
+   d'abord, la garnison prend le reste du budget.
+5. **Colonisation**, s'il est temps d'agir (voir plus haut). Parmi ses cases en paix remplies
    au-delà de `settle_fill_ratio`, la plus remplie envoie une vague de colons vers sa meilleure case
    libre voisine. Elle préfère la prairie à la montagne, et une case qui touche le plus de terres
    libres. Une seule vague à la fois.
-5. **Boost.** Pendant une rafale, chaque clic va à sa case en paix la moins remplie.
+6. **Boost.** Pendant une rafale, chaque clic va à sa case en paix la moins remplie.
 
 Une case garde toujours au moins **2 workers** (`keep_workers`) pour continuer à grandir.
 
@@ -547,12 +659,19 @@ joueur.
 
 Ce sont des constats sur les règles actuelles, pas des bugs.
 
-- **Garnison ou armée.** L'armée en attente et les fighters engagés en bataille ne coûtent ni or ni
-  food ; seule la garnison coûte. En échange, la garnison défend deux fois mieux. Le choix entre
-  garnison (chère, solide) et armée (gratuite, mobile, fragile) dépend donc de `army_per_garrison`
+- **Garnison ou armée.** L'armée en attente ne coûte pas d'or et ne mange qu'une demi-ration ; les
+  fighters engagés en bataille ne coûtent rien. La garnison coûte de l'or et une ration entière, mais
+  défend deux fois mieux (et derrière les remparts d'une mégapole). Le choix entre garnison (chère,
+  solide) et armée (bon marché, mobile, fragile) dépend donc de `army_per_garrison`, de `army_food`
   et du coût en or et en food des fighters.
-- **Ratio 2:1 identique pour l'or et la food.** Une case équilibrée en food l'est aussi en or. Pour
-  créer de vrais choix, il suffirait de modifier l'un des deux.
+- **Ratio 2:1 identique pour l'or et la food, dans les villages.** Un village équilibré en food l'est
+  aussi en or. Les villes cassent ce lien : elles rapportent plus d'or (3 par worker) mais mangent la
+  food de leurs voisines.
+- **Seuil juste pour les villes.** 6 villages pleins nourrissent exactement une ville de 1024. Une
+  garnison dans ces villages, ou un village partagé entre deux villes, et la ville plafonne plus bas.
+  Levier : `city_food_per_individual` (2,9 donne une petite marge).
+- **Montagne et ville.** En montagne, la ville ne gagne pas de place (capacité 256 dans les deux cas),
+  seulement le droit d'accueillir des scientists.
 - **Démarrage exponentiel.** Avec 2 workers, les premières minutes sont lentes, et Boost y pèse
   énormément : à 2 workers, un clic (+50 %) vaut environ 17 s de croissance naturelle. C'est
   pourquoi le rythme de clics est l'un des principaux réglages de difficulté des IA.

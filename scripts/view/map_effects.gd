@@ -1,22 +1,26 @@
 class_name MapEffects
 extends RefCounted
 ## Effets éphémères posés sur les cases de la carte, dessinés par-dessus tout le reste :
-## - VICTORY, DEFEAT, COLONY : un picto et son titre surgissent de la case, montent et s'effacent en
-##   fondu, sur des feux d'artifice (victoire), une pluie de braises (défaite) ou une onde et des
-##   étincelles (terre conquise) ;
+## - VICTORY, DEFEAT, COLONY, CITY, VILLAGE : un picto et son titre surgissent de la case, montent et
+##   s'effacent en fondu, sur des feux d'artifice (victoire, ville fondée), une pluie de braises (défaite,
+##   ville redevenue village) ou une onde et des étincelles (terre conquise) ;
 ## - FLASH : éclair blanc et onde à la couleur du nouveau propriétaire, quand une case change de main
 ##   par la guerre ;
 ## - BOOST : « +N » qui s'envole de la case.
 
-enum Kind { VICTORY, DEFEAT, COLONY, FLASH, BOOST }
+enum Kind { VICTORY, DEFEAT, COLONY, CITY, VILLAGE, FLASH, BOOST }
 
 ## Durée (s) de chaque effet.
-const DURATIONS := {Kind.VICTORY: 2.4, Kind.DEFEAT: 2.4, Kind.COLONY: 2.0, Kind.FLASH: 0.7, Kind.BOOST: 0.8}
-const LABELS := {Kind.VICTORY: "VICTOIRE !", Kind.DEFEAT: "DÉFAITE", Kind.COLONY: "TERRE CONQUISE"}
+const DURATIONS := {Kind.VICTORY: 2.4, Kind.DEFEAT: 2.4, Kind.COLONY: 2.0, Kind.CITY: 2.4, Kind.VILLAGE: 2.0,
+		Kind.FLASH: 0.7, Kind.BOOST: 0.8}
+const LABELS := {Kind.VICTORY: "VICTOIRE !", Kind.DEFEAT: "DÉFAITE", Kind.COLONY: "TERRE CONQUISE",
+		Kind.CITY: "VILLE FONDÉE", Kind.VILLAGE: "RETOUR AU VILLAGE"}
 const LABEL_COLORS := {
 	Kind.VICTORY: Color("ffd84a"),
 	Kind.DEFEAT: Color("ff5a4a"),
 	Kind.COLONY: Color("7cf06a"),
+	Kind.CITY: Color("d8a8ff"),
+	Kind.VILLAGE: Color("c8b89a"),
 }
 const FIREWORK_COLORS := [Color("ffd84a"), Color("ff5ad2"), Color("5ae0ff"), Color("ffffff"), Color("9cff5a")]
 const EMBER_COLORS := [Color("ff5a2a"), Color("ffa030"), Color("8a8480"), Color("c83c32")]
@@ -27,7 +31,7 @@ var _effects: Array[Dictionary] = []
 
 
 ## Ajoute un effet `kind` sur `cell`, dans la couleur `color` (onde du flash et de la terre conquise),
-## avec le texte `text` (BOOST).
+## avec le texte `text` (celui de BOOST, ou un titre qui remplace le titre habituel).
 func add(kind: Kind, cell: Vector2i, color: Color = Color.WHITE, text: String = "") -> void:
 	_effects.append({"kind": kind, "cell": cell, "start": _now(), "color": color, "text": text, "seed": randi()})
 
@@ -71,9 +75,9 @@ func _draw_event(canvas: CanvasItem, font: Font, center: Vector2, radius: float,
 	var rng := RandomNumberGenerator.new()
 	rng.seed = effect.seed
 	match kind:
-		Kind.VICTORY:
+		Kind.VICTORY, Kind.CITY:
 			_draw_fireworks(canvas, center, radius, t, rng)
-		Kind.DEFEAT:
+		Kind.DEFEAT, Kind.VILLAGE:
 			_draw_embers(canvas, center, radius, t, rng)
 		Kind.COLONY:
 			_draw_sparkles(canvas, center, radius, t, rng, effect.color)
@@ -97,13 +101,18 @@ func _draw_event(canvas: CanvasItem, font: Font, center: Vector2, radius: float,
 	for layer in 5:
 		canvas.draw_circle(position, radius * scale * (0.75 - layer * 0.12) * (0.9 + 0.2 * pulse),
 				Color(label_color, 0.12 * alpha))
-	var icon: Texture2D = {Kind.VICTORY: Icons.VICTORY, Kind.DEFEAT: Icons.DEFEAT, Kind.COLONY: Icons.COLONY}[kind]
+	var icon: Texture2D = {Kind.VICTORY: Icons.VICTORY, Kind.DEFEAT: Icons.DEFEAT, Kind.COLONY: Icons.COLONY,
+			Kind.CITY: Icons.settlement_icon(1), Kind.VILLAGE: Icons.settlement_icon(0)}[kind]
+	# Les icônes de la ville et du village, en niveaux de gris, prennent la couleur du joueur.
+	var tint: Color = effect.color if kind in [Kind.CITY, Kind.VILLAGE] else Color.WHITE
 	var wobble := sin(t * 28.0) * 0.3 * (1.0 - t) if kind == Kind.DEFEAT else 0.0
 	var size := Vector2.ONE * radius * 1.0
 	canvas.draw_set_transform(position, wobble, Vector2.ONE * scale)
-	canvas.draw_texture_rect(icon, Rect2(-size / 2.0, size), false, Color(1.0, 1.0, 1.0, alpha))
+	canvas.draw_texture_rect(icon, Rect2(-size / 2.0, size), false, Color(tint, alpha))
 	canvas.draw_set_transform_matrix(Transform2D.IDENTITY)
-	_text(canvas, font, LABELS[kind], position + Vector2(0.0, size.y * 0.7 * scale), int(radius * 0.32 * scale),
+	# `text`, s'il est donné, remplace le titre habituel.
+	var label: String = effect.text if effect.text != "" else LABELS[kind]
+	_text(canvas, font, label, position + Vector2(0.0, size.y * 0.7 * scale), int(radius * 0.32 * scale),
 			label_color, alpha)
 
 

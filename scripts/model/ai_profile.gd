@@ -36,15 +36,19 @@ const PATHS := {
 @export var keep_workers: int = 2
 
 @export_group("Expansion")
-## Une case envoie des colons quand sa population atteint cette part de sa capacité.
+## Une case envoie des colons quand sa population atteint cette part de la capacité de son terrain (celle
+## d'une ville ; un village plafonne à rules.village_capacity).
 @export_range(0.0, 1.0) var settle_fill_ratio: float = 0.1
 ## Colons envoyés à chaque fois (dans la limite de rules.max_settlers).
 @export var settlers_per_wave: int = 16
+## Un village plein ne passe en ville que si ses voisines peuvent lui envoyer de quoi nourrir une ville de
+## sa taille, avec cette marge (une ville ne produit pas de food, et ses citadins mangent plus).
+@export var city_food_margin: float = 1.2
 
 @export_group("Défense et science")
 ## Garnison visée sur une case frontalière : cette part de la plus grosse population ennemie voisine.
 @export var garrison_ratio: float = 0.4
-## Scientists visés dans chaque case : cette part de sa population (workers, scientists et fighters).
+## Scientists visés dans chaque ville (un village n'en accueille pas) : cette part de sa population (workers, scientists et fighters).
 @export var science_ratio: float = 0.15
 
 @export_group("Guerre")

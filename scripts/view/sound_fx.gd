@@ -5,7 +5,8 @@ extends Node
 ## exactement pareil :
 ## - battle : mêlée d'une case en guerre (une lame tirée, puis des chocs de fer) ;
 ## - wagon : chariot de colons en route (grincement et cahots des roues, le temps du trajet) ;
-## - victory : clameur de foule ; defeat : choc sourd et rumeur de foule, plus grave et plus lente ;
+## - victory : clameur de foule ; city : clameur plus légère et plus aiguë (ville fondée) ;
+##   defeat : choc sourd et rumeur de foule, plus grave et plus lente ;
 ## - click : petit clic de bouton, joué automatiquement par tous les boutons de la scène (fenêtres
 ##   ouvertes ensuite comprises) ; laser : petit tir laser du bouton Boost.
 
@@ -107,6 +108,11 @@ func wagon(seconds: float) -> void:
 ## Victoire : clameur de foule.
 func victory() -> void:
 	_play_crowd(-2.0, 1.05)
+
+
+## Ville fondée : clameur de foule plus légère et plus aiguë que celle d'une victoire.
+func city() -> void:
+	_play_crowd(-8.0, 1.2)
 
 
 ## Défaite : choc sourd, puis rumeur de foule plus grave et plus lente, comme consternée.

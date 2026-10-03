@@ -9,6 +9,10 @@ extends Control
 signal transfer_requested(from_role: String, to_role: String, amount: int)
 ## Émis à chaque clic sur le bouton Boost.
 signal boost_requested
+## Émis au clic sur le bouton « Progress to city » d'un village plein.
+signal city_requested
+## Émis au clic sur le bouton « Downgrade to village » d'une ville.
+signal downgrade_requested
 ## Émis à chaque clic sur un autre bouton du zoom (« + », « - », Settler, Army, raccourcis) : pour le
 ## bruit du clic.
 signal button_clicked
@@ -27,20 +31,30 @@ const ACTION_BUTTON_GAP := 6.0
 ## Army : clic gauche = un fighter de la garnison rejoint l'armée, ou à défaut un worker devient
 ## fighter et la rejoint ; clic droit = un fighter quitte l'armée et redevient worker.
 ## Boost : chaque clic ajoute des workers à la case.
+## Downgrade to village : sur une ville seulement (sa place reste vide ailleurs), la fait redevenir
+## village, après confirmation (voir downgrade_requested).
 const SETTLER_ACTION := "settler"
 const ARMY_ACTION := "army"
 const BOOST_ACTION := "boost"
-const ACTIONS := [SETTLER_ACTION, ARMY_ACTION, BOOST_ACTION]
+const DOWNGRADE_ACTION := "downgrade"
+const ACTIONS := [SETTLER_ACTION, ARMY_ACTION, BOOST_ACTION, DOWNGRADE_ACTION]
 const ACTION_COLORS := {
 	SETTLER_ACTION: Color(0.72, 0.52, 0.3),
 	ARMY_ACTION: Color(0.82, 0.26, 0.22),
 	BOOST_ACTION: Color(0.95, 0.6, 0.15),
+	DOWNGRADE_ACTION: Color(0.45, 0.4, 0.55),
 }
 ## Raccourcis « tout d'un coup » : toute l'armée rejoint la garnison (bouton à droite d'Army), toute la
 ## garnison rejoint l'armée (bouton à droite des « - » et « + » de la garnison, dans la limite de
 ## rules.max_army).
 const ALL_TO_GARRISON := "all_to_garrison"
 const ALL_TO_ARMY := "all_to_army"
+## Bouton « Progress to city », à la place des scientists dans un village plein : couleur et libellé.
+const CITY_ACTION := "city"
+const CITY_COLOR := Color(0.62, 0.42, 0.85)
+const CITY_TEXT := "Progress to city"
+## Couleur de la ligne qui rappelle la capacité d'un village pas encore plein.
+const VILLAGE_HINT_COLOR := Color(0.85, 0.85, 0.85)
 ## Durée (s) de l'éclat d'un bouton d'action après un clic.
 const FLASH_TIME := 0.15
 ## Couleur du revenu en or de la case.
@@ -147,21 +161,22 @@ func _draw() -> void:
 		else:
 			# Case ennemie en vue : sa population totale seulement, sans détail ni commandes.
 			var total := population.whole_total()
-			PopulationText.draw_icon_row(self, font, [[Icons.settlement(total / world.capacity(cell)),
+			PopulationText.draw_icon_row(self, font, [[Icons.settlement(world, cell),
 					NumberFormat.compact(total), text_color, CellBackground.PLAYER_COLORS[owner]]], center, font_size, 1.7)
 		return
 	_draw_header(center - Vector2(0.0, full_radius + HEADER_HEIGHT / 2.0), maxi(12, int(radius * 0.13)))
 	_draw_actions(population, center.y + full_radius + ACTION_BUTTON_GAP, full_radius)
 	_draw_food_flows(center, radius)
-	_draw_roles(population, center, font, font_size)
+	_draw_roles(population, center, radius, font, font_size)
 
 
 ## Rôles d'une case du joueur, en colonne centrée sur `center` : les workers seuls en haut, puis les
 ## scientists et la garnison, chacun avec son icône et, juste en dessous, ses gros boutons « - » et « + »
 ## (échange avec les workers) ; la garnison a en plus, à droite, le raccourci ALL_TO_ARMY. Les rôles qui
 ## grandissent ont leur barre de progression. Tous les boutons sont grisés sur une case en guerre, qui
-## est figée.
-func _draw_roles(population: Population, center: Vector2, font: Font, font_size: int) -> void:
+## est figée. Un village n'a pas de scientists : à leur place, sa population et sa capacité, puis, une
+## fois plein, le gros bouton « Progress to city ».
+func _draw_roles(population: Population, center: Vector2, radius: float, font: Font, font_size: int) -> void:
 	const ROLE_ICONS := {"scientist": Icons.SCIENTIST, "fighter": Icons.GARRISON}
 	var commandable := world.can_command(viewer_id, cell)
 	var progress := world.progress(cell, cycle_fraction)
@@ -174,6 +189,11 @@ func _draw_roles(population: Population, center: Vector2, font: Font, font_size:
 			+ (roles.size() - 1) * gap
 	var y := center.y - block_height / 2.0 + line_height / 2.0
 	for role in roles:
+		if role == "scientist" and not world.is_city(cell):
+			_draw_village_slot(population, Rect2(center.x - radius * 0.7, y - line_height / 2.0, radius * 1.4,
+					line_height + gap * 0.5 + button_size.y), font, font_size)
+			y += line_height + gap * 0.5 + button_size.y + gap
+			continue
 		_draw_role_line(population, role, ROLE_ICONS.get(role), progress.get(role, -1.0), Vector2(center.x, y),
 				font, font_size)
 		y += line_height / 2.0
@@ -201,6 +221,22 @@ func _draw_roles(population: Population, center: Vector2, font: Font, font_size:
 				_shortcut_rects[ALL_TO_ARMY] = rect
 			y += gap * 0.5 + button_size.y
 		y += gap + line_height / 2.0
+
+
+## Place des scientists dans un village, `slot` : le gros bouton « Progress to city » s'il est plein et
+## peut passer en ville, sinon sa population sur sa capacité.
+func _draw_village_slot(population: Population, slot: Rect2, font: Font, font_size: int) -> void:
+	var tint: Color = CellBackground.PLAYER_COLORS[viewer_id]
+	if world.can_found_city(viewer_id, cell):
+		_action_rects[CITY_ACTION] = slot
+		_draw_action_box(slot, CITY_COLOR, CITY_ACTION)
+		PopulationText.draw_icon_row(self, font, [[Icons.settlement_icon(1), CITY_TEXT, Color.WHITE, tint]],
+				slot.get_center(), font_size)
+		return
+	var text := "Village : %s / %s" % [NumberFormat.compact(floori(population.residents() + 1e-6)),
+			NumberFormat.compact(floori(world.capacity(cell)))]
+	PopulationText.draw_icon_row(self, font, [[Icons.settlement_icon(0), text, VILLAGE_HINT_COLOR, tint]],
+			slot.get_center(), font_size)
 
 
 ## Ligne centrée sur `center` : icône du rôle (s'il en a une), libellé dans sa couleur, effectif, puis
@@ -289,6 +325,16 @@ func _press_action(action: String, mouse_button: int) -> void:
 		if mouse_button == MOUSE_BUTTON_LEFT:
 			_flash[action] = 1.0
 			boost_requested.emit()
+		return
+	if action == DOWNGRADE_ACTION:
+		if mouse_button == MOUSE_BUTTON_LEFT:
+			button_clicked.emit()
+			downgrade_requested.emit()
+		return
+	if action == CITY_ACTION:
+		if mouse_button == MOUSE_BUTTON_LEFT:
+			button_clicked.emit()
+			city_requested.emit()
 		return
 	# Settler et Army : clic gauche pour remplir la réserve, clic droit pour la vider.
 	var reserve: Array = RESERVES[action]
@@ -390,7 +436,8 @@ func _draw_alerts(center: Vector2, font_size: int) -> void:
 		PopulationText.draw_icon_row(self, get_theme_default_font(), items, center, font_size)
 
 
-## Gros boutons d'action empilés à partir de `top` : Settler et Army (avec leur réserve), puis Boost ;
+## Gros boutons d'action empilés à partir de `top` : Settler et Army (avec leur réserve), Boost, puis
+## Downgrade to village sur une ville ;
 ## Army est suivi, à sa droite, du raccourci ALL_TO_GARRISON. Un bouton s'éclaire un instant à chaque
 ## clic, et se grise quand il n'a aucun effet possible (tous quand la case est en guerre, car elle est
 ## figée).
@@ -406,10 +453,14 @@ func _draw_actions(population: Population, top: float, full_radius: float) -> vo
 		ARMY_ACTION: [Icons.SWORD, "Army : %s" % NumberFormat.compact(population.army),
 				commandable and (can_add_army or population.army > 0)],
 		BOOST_ACTION: [Icons.BOOST, "Boost", commandable and world.free_room(cell) > 0],
+		DOWNGRADE_ACTION: [Icons.settlement_icon(0), "Downgrade to village", world.can_downgrade_city(viewer_id, cell)],
 	}
 	var button_size := Vector2(minf(full_radius * 1.6, size.x - margin * 2.0), ACTION_BUTTON_HEIGHT)
 	var font := get_theme_default_font()
 	for action in ACTIONS:
+		# Pas de bouton Downgrade sur un village : sa place reste vide, pour que les autres ne bougent pas.
+		if action == DOWNGRADE_ACTION and not world.is_city(cell):
+			continue
 		var rect := Rect2(Vector2(size.x / 2.0 - button_size.x / 2.0, top), button_size)
 		if action == ARMY_ACTION:
 			# Le raccourci carré prend sa place à droite, sur la largeur de la ligne.
@@ -422,7 +473,9 @@ func _draw_actions(population: Population, top: float, full_radius: float) -> vo
 			_shortcut_rects[ALL_TO_GARRISON] = shortcut
 		_action_rects[action] = rect
 		_draw_action_box(rect, ACTION_COLORS[action] if labels[action][2] else PopulationText.DISABLED_COLOR, action)
-		PopulationText.draw_icon_row(self, font, [[labels[action][0], labels[action][1], Color.WHITE]],
+		# L'icône du village, en niveaux de gris, prend la couleur du joueur.
+		var tint: Color = CellBackground.PLAYER_COLORS[viewer_id] if action == DOWNGRADE_ACTION else Color.WHITE
+		PopulationText.draw_icon_row(self, font, [[labels[action][0], labels[action][1], Color.WHITE, tint]],
 				rect.get_center(), int(ACTION_BUTTON_HEIGHT * 0.42))
 		if action == BOOST_ACTION:
 			_draw_boost_pops(rect)

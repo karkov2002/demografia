@@ -16,7 +16,7 @@ const FOG_TILE := preload("res://assets/tiles/fog.png")
 const PLAYER_COLORS := [Color("4a82f5"), Color("0fa396"), Color("d27a14"), Color("e04464")]
 const PLAYER_COLOR_NAMES := ["bleu", "vert", "orange", "rouge"]
 ## Opacité du voile à la couleur du propriétaire sur une case pleine ; elle est proportionnelle à son
-## remplissage (population totale ÷ capacité).
+## remplissage (habitants, hors troupe, ÷ capacité de son terrain, celle d'une ville).
 const MAX_ALPHA := 0.8
 ## Agglomérations posées sur la tuile, par époque puis par palier (village, ville, mégapole ; voir
 ## Icons.settlement_tier) : [bâtiments aux couleurs naturelles, toits et bannières à teinter à la couleur
@@ -47,14 +47,14 @@ static func draw(canvas: CanvasItem, world: World, viewer_id: int, cell: Vector2
 	var cell_owner := world.owner(cell)
 	if cell_owner == World.NO_PLAYER or not world.is_visible(viewer_id, cell):
 		return
-	var fill := clampf(world.population(cell).whole_total() / world.capacity(cell), 0.0, 1.0)
+	var fill := clampf(world.population(cell).residents() / world.terrain_capacity(cell), 0.0, 1.0)
 	var color: Color = PLAYER_COLORS[cell_owner]
 	canvas.draw_colored_polygon(points, Color(color, MAX_ALPHA * fill))
 	if with_settlement:
 		# Même cadre que la tuile : les pixels des bâtiments ont la taille de ceux du terrain.
 		var tile_size := Vector2(sqrt(3.0) * radius, 2.0 * radius)
 		var rect := Rect2(center - tile_size / 2.0, tile_size)
-		var sprites: Array = SETTLEMENTS["antiquity"][Icons.settlement_tier(fill)]
+		var sprites: Array = SETTLEMENTS["antiquity"][Icons.settlement_tier(world, cell)]
 		canvas.draw_texture_rect(sprites[0], rect, false)
 		canvas.draw_texture_rect(sprites[1], rect, false, Color(color, ROOF_TINT))
 
