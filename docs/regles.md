@@ -42,13 +42,15 @@ La famine et le surpeuplement tournent sur leur propre horloge, toutes les 0,1 s
 
 | Variable | Valeur | Où | Rôle |
 |---|---|---|---|
-| `columns` × `rows` | **10 × 10** par défaut, de 2 à 20 par côté | fenêtre « Nouvelle partie » | Taille de la carte. |
-| `mountain_count` | **5** | `GameRules` | Montagnes pour 100 cases, proportionnel à la taille de la carte. |
-| `water_count` | **5** | `GameRules` | Cases d'eau pour 100 cases, proportionnel à la taille de la carte. |
-| `map_reference_cells` | **100** | `GameRules` | Taille de carte (en cases) pour laquelle `mountain_count` et `water_count` sont réglés. |
-| `capacity[PRAIRIE]` | **1024** | `GameRules` | Règle d'or : population maximale d'une case. |
-| `capacity[MOUNTAIN]` | **256** | `GameRules` | Idem. |
-| `capacity[WATER]` | **0** | `GameRules` | Inhabitable. |
+| Type de carte | **Continents** par défaut | fenêtre « Nouvelle partie » | Îles, Continents, Lacs ou Méditerranée (voir « Types de carte »). |
+| `columns` × `rows` | **10 × 10** par défaut, jusqu'à 20 par côté | fenêtre « Nouvelle partie » | Taille de la carte ; le minimum dépend du type de carte et du nombre de joueurs. |
+| `mountain_count` | **6** | `GameRules` | Montagnes pour 100 cases de terre, multiplié au hasard par 0,8 à 1,8 (`mountain_spread`). |
+| `forest_count`, `hill_count`, `marsh_count` | **14**, **9**, **6** | `GameRules` | Forêts, collines et marais pour 100 cases de terre, posés en petits massifs. |
+| `water_count` | **15** | `GameRules` | Carte « Lacs » : cases d'eau pour 100 cases, en grandes étendues. |
+| `islands_land_ratio`, `continents_land_ratio` | **45 %**, **50 %** | `GameRules` | Part de terre des cartes « Îles » et « Continents ». |
+| `mediterranean_sea_ratio` | **35 %** | `GameRules` | Part de la carte « Méditerranée » occupée par la mer centrale. |
+| `map_reference_cells` | **100** | `GameRules` | Taille de carte (en cases) pour laquelle les nombres ci-dessus sont réglés. |
+| `capacity` | voir « Terrains » | `GameRules` | Règle d'or : population maximale d'une case selon son terrain. |
 | `village_capacity` | **256** | `GameRules` | Population maximale d'un village (voir « Villages et villes »). |
 | `city_growth_factor` | **0,5** | `GameRules` | Multiplie l'accroissement par cycle d'une ville : elle grandit plus lentement qu'un village. |
 | `megapolis_threshold` | **2/3** | `GameRules` | Remplissage (habitants ÷ capacité du terrain) à partir duquel une ville est une mégapole. |
@@ -81,8 +83,8 @@ complètent :
 | Défense | normale | mégapole (≥ 2/3 de la capacité du terrain) : **remparts**, garnison ×1,5 |
 
 On obtient ainsi une civilisation réaliste : des zones agricoles (villages) entourent des zones
-urbaines denses (villes) qui concentrent la science, l'or et la population. **Chaque village plein
-nourrit 1/6 d'une ville** : il en faut 6 pour une ville de 1024 (voir §4). Les autres règles
+urbaines denses (villes) qui concentrent la science, l'or et la population. **Un village plein en
+plaine nourrit 1/4 d'une ville** : il en faut 4 pour une ville de 1024 (6 en forêt ; voir §4). Les autres règles
 (garnison, armée, colons, Boost, batailles) sont les mêmes dans les deux cas.
 
 - **Downgrade to village.** Dans le zoom d'une ville en paix, un gros bouton « Downgrade to village »
@@ -109,11 +111,58 @@ nourrit 1/6 d'une ville** : il en faut 6 pour une ville de 1024 (voir §4). Les 
   (`DowngradeCityCommand`) sont des commandes, comme les autres actions, pour l'humain comme pour
   l'IA. Le premier n'est possible que sur un village plein, en paix ; le second sur une ville en paix.
 
-**Départ.** Le joueur humain choisit sa case de départ (jamais sur l'eau). Chaque IA tire ensuite la
-sienne au hasard parmi les cases libres hors de l'eau. La génération de la carte garde toujours au
-moins une case hors de l'eau par joueur.
+**Terrains (depuis le 03/10).**
 
-**Brouillard de guerre.** L'eau est toujours connue. Un joueur voit ses cases et leurs voisines, et se
+| Terrain | Capacité | Food par worker de village | Or par worker | Défense | Tuile |
+|---|---|---|---|---|---|
+| Plaine | 1024 | **4** | 2 | ×1 | herbe et fleurs |
+| Forêt | 768 | 3 | 2 | ×1 | frondaisons rondes |
+| Colline | 768 | 2,5 | 2 | **×1,5** | croupes herbeuses |
+| Marais | 512 | 2 | 2 | ×1 | mares, roseaux et massettes |
+| Montagne | 256 | 3 | **3** | **×2** | pics enneigés |
+| Eau | 0 (inhabitable) | — | — | — | vagues |
+
+La food est `food_per_worker`, l'or de montagne `mountain_gold_per_worker`, la défense
+`terrain_defense` (tous dans `GameRules`). En ville, un worker ne produit pas de food et rapporte 3
+d'or quel que soit le terrain. Les tuiles sont générées par `tools/generate_tiles.gd`.
+
+**Types de carte** (`MapGenerator`, choisi dans la fenêtre « Nouvelle partie ») :
+- **Îles** : de l'eau partout, et **deux fois plus d'îles que de joueurs**, compactes et séparées par
+  l'eau, loin des bords. Chaque joueur démarre seul sur une île.
+- **Continents** : **deux continents** entourés d'océan, côte à côte dans le sens de la plus grande
+  dimension de la carte. Les joueurs sont répartis en alternance : au moins un par continent.
+- **Lacs** : une grande plaine semée de quelques grandes étendues d'eau (environ 15 % de la carte).
+- **Méditerranée** : une grande mer centrale à la côte découpée (35 % de la carte), entourée de terres
+  jusqu'aux bords.
+
+Sur les terres, les montagnes sont semées au hasard, en nombre variable d'une partie à l'autre
+(×0,8 à ×1,8). Forêts, collines et marais forment de petits massifs (de 1 à 4 cases), les marais au
+bord de l'eau quand c'est possible. Ces quantités suivent la surface des terres.
+
+**Taille minimale** (largeur et hauteur), pour que les contraintes tiennent :
+
+| Type | 2 joueurs | 3 joueurs | 4 joueurs |
+|---|---|---|---|
+| Îles | 8 | 9 | 11 |
+| Continents | 7 | 8 | 8 |
+| Lacs | 4 | 5 | 6 |
+| Méditerranée | 6 | 6 | 7 |
+
+La fenêtre « Nouvelle partie » relève la largeur et la hauteur si besoin.
+
+**Départ (depuis le 03/10).** On ne choisit plus sa case de départ : comme pour les IA, elle est tirée
+au hasard pour chaque joueur, humain compris, toujours en **plaine**, la plus éloignée possible des
+autres départs (avec un peu de hasard) et de préférence loin de l'eau. Les voisines d'une case de départ
+ne sont jamais des montagnes. La partie commence aussitôt, la case de départ du joueur sélectionnée.
+Si une carte trop petite ne permet pas une île ou un continent par joueur après 30 essais, les départs
+sont simplement répartis sur les terres les plus éloignées.
+
+**Traverser l'eau.** Il n'existe pas encore de moyen de traverser l'eau. La navigation viendra plus tard, à rechercher
+dans l'arbre technologique. Sur la carte « Îles », chaque
+joueur reste donc seul sur son île, et deux continents ne peuvent pas s'atteindre (voir §11).
+
+**Brouillard de guerre.** Toute la carte est d'abord dans le brouillard, **eau comprise** (depuis le
+03/10). Un joueur voit ses cases et leurs voisines, et se
 souvient du terrain déjà découvert. Une case ennemie en vue porte un voile à la couleur de son
 propriétaire et affiche sa population totale, sans le détail. La composition n'est révélée qu'aux
 joueurs engagés dans une bataille sur la case.
@@ -192,6 +241,13 @@ désélectionne la case : le zoom revient à « Cliquez sur une case ».
   sa capacité atteint, de 1 (village naissant) à 6 (village plein de 256)
   (`assets/settlements/antiquity_fields_1.png` à `_6.png`, générées par `tools/generate_settlements.gd`).
   Les villes n'en ont pas : on voit d'un coup d'œil les zones agricoles autour des villes.
+- **Fortifications.** Chaque case du joueur qui a une **garnison** est fortifiée le long de ses
+  frontières : une **palissade** de pieux appointés, puis un **mur de pierre** crénelé à partir de
+  100 fighters en garnison (`WALL_STONE_GARRISON`). Comme les frontières, il n'y a pas de mur entre
+  deux cases du joueur : les fortifications forment une grande muraille autour de sa civilisation, et
+  une case sans garnison y fait un **trou** bien visible, qui montre la zone non protégée. Seules les
+  cases du joueur sont fortifiées à l'écran (la garnison ennemie reste cachée). Réglages dans
+  `scripts/view/hex_map.gd`.
 - **Armée prête.** Un petit soldat qui marche sur place, sur un disque clair, en haut à gauche d'une
   case du joueur, signale qu'une armée y attend, prête à partir. Les armées ennemies restent cachées
   (on n'en voit que la population totale de la case).
@@ -230,12 +286,11 @@ les bruitages.
 **Bouton son.** Un petit haut-parleur en bas à droite de l'écran coupe tous les sons d'un clic
 (bruitages et musique) : il est alors barré d'une croix rouge. Un autre clic remet le son. C'est le bus
 audio principal qui est rendu muet, donc le réglage tient au retour au menu et dans les parties
-suivantes. Tant que le bouton « Choisir la case de départ » est affiché, le haut-parleur se place
-juste au-dessus.
+suivantes.
 
 **Menu.** Un bouton « Menu », au bout de la barre des ressources en haut du panneau de droite, propose
 pour l'instant un seul choix, « Quitter ». Il demande « Do you really want to quit ? » (Yes / No) et le
-jeu est en pause pendant la question ; Yes ramène au menu principal. La touche Échap fait la même
+jeu est en pause pendant la question ; Yes **abandonne** la partie et ouvre la fenêtre de fin (§10). La touche Échap fait la même
 chose. En fin de partie, Quitter et Échap ramènent directement au menu.
 
 **Frontières.** Le territoire de chaque joueur en vue est entouré d'une frontière à sa couleur, au
@@ -319,7 +374,7 @@ on atteint 10 par seconde en ≈ 0,8 s et 500 par seconde en ≈ 2,4 s. Aucune c
 
 | Variable | Valeur | Rôle |
 |---|---|---|
-| `food_per_worker` | **3** | Food produite par worker **d'un village** et par cycle (0 dans une ville). |
+| `food_per_worker` | **4** en plaine, 3 en forêt et en montagne, 2,5 en colline, 2 en marais | Food produite par worker **d'un village** et par cycle, selon le terrain (0 dans une ville). |
 | `food_per_individual` | **1** | Food mangée par worker, scientist ou fighter de garnison, par cycle, dans un village. |
 | `city_food_per_individual` | **3** | Idem dans une ville : un citadin mange 3. |
 | `army_food` | **0,5** | Ration mangée par chaque fighter de l'armée d'une case, par cycle. |
@@ -328,30 +383,33 @@ on atteint 10 par seconde en ≈ 0,8 s et 500 par seconde en ≈ 2,4 s. Aucune c
 
 Formules :
 
-    solde d'un village = 3 × workers − 1 × (workers + garnison) − 0,5 × armée
-                      = 2 × workers − garnison − 0,5 × armée
+    solde d'un village = F × workers − 1 × (workers + garnison) − 0,5 × armée
+                      (F = food par worker du terrain : 4 en plaine, 3 en forêt…)
     solde d'une ville   = − 3 × (workers + scientists + garnison) − 0,5 × armée
 
-- **Dans un village, un worker nourrit 2 fighters de garnison.** Un village plein de 256 workers a un
-  surplus de **512** par cycle.
+- **Surplus d'un village plein** (256 workers) : **768** en plaine (un worker y nourrit 3 fighters de
+  garnison), 512 en forêt et en montagne, 384 en colline, 256 en marais.
 - **Une ville ne produit rien** et chaque citadin, workers compris, mange **3** par cycle. Une ville
-  pleine (1024) a besoin de **3072 food** par cycle, soit exactement le surplus de 6 villages pleins.
+  pleine (1024) a besoin de **3072 food** par cycle : le surplus de 4 villages de plaine pleins, ou de
+  6 villages de forêt.
 - **Partage prioritaire (depuis le 03/10).** Le surplus d'une case va **uniquement aux voisines du même
   joueur qui manquent de food** (solde négatif), en proportion de leur manque, sans le dépasser. Ce
   qui reste est perdu (pas de stock). Le partage ne se fait qu'entre voisines directes, pas au-delà.
   Les cases en guerre, figées, n'envoient ni ne reçoivent rien.
-- **Taille d'une ville selon ses villages** *(calculé et vérifié en simulation, villages pleins sans
-  garnison, qui ne nourrissent qu'elle)* : chaque village plein nourrit 512 ÷ 3 ≈ 171 citadins.
+- **Taille d'une ville selon ses villages** *(calculé et vérifié en simulation, villages de plaine
+  pleins sans garnison, qui ne nourrissent qu'elle)* : chaque village de plaine plein nourrit
+  768 ÷ 3 = 256 citadins (forêt ou montagne : 171, colline : 128, marais : 85).
 
-  | Villages pleins autour | 1 | 2 | 3 | 4 | 5 | 6 |
-  |---|---|---|---|---|---|---|
-  | Taille maximale de la ville | redevient village | 344 | ≈ 512 | 685 | 855 | **1024** |
+  | Villages de plaine pleins autour | 1 | 2 | 3 | 4 |
+  |---|---|---|---|---|
+  | Taille maximale de la ville | ≈ 256 (à la limite) | ≈ 512 | 768 | **1024** |
 
   Le seuil est juste : une garnison dans les villages, ou un village partagé entre deux villes, et la
-  ville plafonne plus bas (6 villages avec 20 fighters de garnison chacun : 906).
+  ville plafonne plus bas (4 villages avec 20 fighters de garnison chacun : 918).
 - **Armée.** L'armée d'une case mange sa ration (0,5 par fighter) sur la food de sa case, **avant** que
   le surplus ne soit exporté. Une armée complète (1024) mange 512 : exactement le surplus d'un village
-  plein, qui n'exporte alors plus rien. Si la case n'y suffit pas, elle reçoit de ses voisines comme
+  plein en forêt ou en montagne, qui n'exporte alors plus rien (un village de plaine en garde 256 à
+  exporter). Si la case n'y suffit pas, elle reçoit de ses voisines comme
   toute case dans le besoin.
 - Les colons en attente, l'armée en route et les fighters engagés dans une bataille **ne mangent pas**.
 - **Famine.** Une case dont la food disponible (son solde plus ce qu'elle reçoit) est négative
@@ -495,7 +553,7 @@ tombée. Les colons, eux, ne la défendent pas.
 | `garrison_strength` | **3** | Force d'un fighter de garnison dans le rapport des forces. |
 | `army_strength` | **2** | Force d'un fighter d'armée (armée du défenseur ou fighters d'un attaquant). |
 | `worker_strength` | **0,25** | Force d'un worker : quatre civils valent un soldat, ils pèsent peu face à une armée. |
-| `mountain_defense` | **×2** | Multiplie la force d'un défenseur en montagne. |
+| `terrain_defense` | **×2** en montagne, **×1,5** en colline | Multiplie la force d'un défenseur selon son terrain. |
 | `megapolis_defense` | **×1,5** | Remparts : multiplie la force de la garnison d'une mégapole (cumulable avec la montagne). |
 | `force_ratio_exponent` | **1,5** | Exposant du rapport des forces : plus il est grand, plus une nette supériorité écrase vite l'adversaire (1 = rapport simple). |
 
@@ -515,7 +573,7 @@ Entre deux attaquants, les pertes habituelles sont de 1 fighter chacun par écha
 
 **Rapport des forces.** Au début de chaque cycle, on calcule la force de chaque camp :
 
-    force du défenseur = (3 × garnison × 1,5 si mégapole + 2 × armée + 0,25 × workers) × 2 s'il est en montagne
+    force du défenseur = (3 × garnison × 1,5 si mégapole + 2 × armée + 0,25 × workers) × 2 en montagne, × 1,5 en colline
     force d'un attaquant = 2 × ses fighters engagés
 
 Les scientists et les colons ne comptent pas. Une force inférieure à 1 compte pour 1. Dans chaque
@@ -682,8 +740,14 @@ Une case garde toujours au moins **2 workers** (`keep_workers`) pour continuer �
 
 La partie se termine quand le joueur humain est éliminé, ou quand il ne reste qu'un seul joueur en
 lice. Un joueur est éliminé quand il n'a plus personne, nulle part : cases, colons (en route compris), armées en attente
-et fighters engagés dans des batailles compris. Une fenêtre affiche alors l'évolution de la population, de la science et de la food de chaque
-joueur.
+et fighters engagés dans des batailles compris. Le joueur peut aussi **abandonner** (Menu > Quitter ou
+Échap, puis Yes).
+
+La fenêtre de fin annonce le résultat avec une illustration en pixel art : trophée et « Victoire ! »,
+épée brisée et « Défaite… », ou drapeau blanc et « Vous avez abandonné ». Elle montre ensuite
+l'évolution de la population, de la science et de la food de chaque joueur, **un graphique par
+onglet** (Population, Science, Food / cycle) pour bien voir chacun ; le réticule de survol garde le même
+instant d'un onglet à l'autre. Le bouton « Menu principal » ramène au menu.
 
 ---
 
@@ -691,6 +755,9 @@ joueur.
 
 Ce sont des constats sur les règles actuelles, pas des bugs.
 
+- **Pas de traversée de l'eau.** Sur la carte « Îles », chaque joueur reste seul sur son île : pas de
+  guerre possible, et la partie ne peut pas se terminer. De même, deux continents ne peuvent pas
+  s'atteindre : la partie ne peut se terminer que si tous les survivants sont sur le même continent. Prévu : la navigation, à rechercher dans l'arbre technologique, et d'autres conditions de victoire.
 - **Garnison ou armée.** L'armée en attente ne coûte pas d'or et ne mange qu'une demi-ration ; les
   fighters engagés en bataille ne coûtent rien. La garnison coûte de l'or et une ration entière, mais
   défend deux fois mieux (et derrière les remparts d'une mégapole). Le choix entre garnison (chère,
@@ -699,7 +766,7 @@ Ce sont des constats sur les règles actuelles, pas des bugs.
 - **Ratio 2:1 identique pour l'or et la food, dans les villages.** Un village équilibré en food l'est
   aussi en or. Les villes cassent ce lien : elles rapportent plus d'or (3 par worker) mais mangent la
   food de leurs voisines.
-- **Seuil juste pour les villes.** 6 villages pleins nourrissent exactement une ville de 1024. Une
+- **Seuil juste pour les villes.** 4 villages de plaine pleins nourrissent exactement une ville de 1024. Une
   garnison dans ces villages, ou un village partagé entre deux villes, et la ville plafonne plus bas.
   Levier : `city_food_per_individual` (2,9 donne une petite marge).
 - **Montagne et ville.** En montagne, la ville ne gagne pas de place (capacité 256 dans les deux cas),
@@ -747,6 +814,7 @@ simulation, sans toucher aux fichiers, pour mesurer son effet.
 | `games=` | 10 | Nombre de parties. |
 | `players=` | `pacifist,normal,aggressive,normal` | Niveau de chaque IA (2 à 4). |
 | `size=` | `10x10` | Taille de la carte. |
+| `map=` | `continents` | Type de carte : `islands`, `continents`, `lakes` ou `mediterranean`. |
 | `minutes=` | 30 | Durée maximale d'une partie. |
 | `seed=` | 1 | Graine de la première partie (les suivantes : +1, +2…). Même graine, même partie. |
 | `rules.<réglage>=` | — | Change un réglage de `GameRules`, par exemple `rules.army_per_garrison=3`. |

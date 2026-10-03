@@ -14,6 +14,8 @@ const SETTLER_MOVE: Array[Texture2D] = [
 const VICTORY := preload("res://assets/icons/victory.png")
 const DEFEAT := preload("res://assets/icons/defeat.png")
 const COLONY := preload("res://assets/icons/colony.png")
+## Drapeau blanc : la partie abandonnée (fenêtre de fin de partie).
+const SURRENDER := preload("res://assets/icons/surrender.png")
 ## Images de l'animation du soldat en marche (troupe en route).
 const ARMY_MOVE: Array[Texture2D] = [
 	preload("res://assets/icons/army_move_0.png"),

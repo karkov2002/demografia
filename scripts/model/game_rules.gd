@@ -8,16 +8,32 @@ const FULL_POPULATION := 1024.0
 
 @export var columns: int = 10
 @export var rows: int = 10
-## Nombre de cases de montagne et d'eau placées au hasard sur une carte de map_reference_cells cases (le
-## reste est en prairie) ; sur une autre taille, ces nombres suivent la proportion.
-@export var mountain_count: int = 5
-@export var water_count: int = 5
+## Génération de la carte (voir MapGenerator). Les nombres de cases sont donnés pour une carte de
+## map_reference_cells cases et suivent la proportion sur une autre taille.
+## Montagnes semées au hasard sur les terres, leur nombre variant de mountain_spread[0] à
+## mountain_spread[1] fois mountain_count.
+@export var mountain_count: int = 6
+@export var mountain_spread: Vector2 = Vector2(0.8, 1.8)
+## Forêts, collines et marais, posés en petits massifs (les marais près de l'eau).
+@export var forest_count: int = 14
+@export var hill_count: int = 9
+@export var marsh_count: int = 6
+## Carte « Lacs » : cases d'eau, en quelques grandes étendues.
+@export var water_count: int = 15
 @export var map_reference_cells: float = 100.0
+## Part des cases en terre : carte « Îles » et carte « Continents ».
+@export var islands_land_ratio: float = 0.45
+@export var continents_land_ratio: float = 0.5
+## Carte « Méditerranée » : part des cases occupée par la mer centrale.
+@export var mediterranean_sea_ratio: float = 0.35
 ## Règle d'or : population maximale d'une case selon son terrain, tous rôles confondus (0 = inhabitable).
 @export var capacity: Dictionary[Terrain.Type, float] = {
 	Terrain.Type.PRAIRIE: 1024.0,
 	Terrain.Type.MOUNTAIN: 256.0,
 	Terrain.Type.WATER: 0.0,
+	Terrain.Type.FOREST: 768.0,
+	Terrain.Type.HILL: 768.0,
+	Terrain.Type.MARSH: 512.0,
 }
 ## Population maximale d'un village (toute case peuplée l'est d'abord) : sa croissance s'y arrête net.
 ## Le joueur peut alors faire passer la case en ville, qui grandit jusqu'à la capacité de son terrain.
@@ -51,7 +67,7 @@ const FULL_POPULATION := 1024.0
 @export var scientists_per_fighter: int = 20
 ## Rapport des forces. Force d'un camp : garrison_strength par fighter de garnison, army_strength par
 ## fighter d'armée (celle du défenseur comme les fighters des attaquants), worker_strength par worker ;
-## celle d'un défenseur en montagne est multipliée par mountain_defense. Dans chaque échange, le camp le
+## celle d'un défenseur est multipliée par le bonus de son terrain (terrain_defense : montagne, colline). Dans chaque échange, le camp le
 ## plus faible subit ses pertes habituelles multipliées par (force adverse ÷ sa force) ^
 ## force_ratio_exponent ; le plus fort garde ses pertes habituelles. Un exposant au-dessus de 1 fait
 ## écraser plus vite l'adversaire quand on a une nette supériorité, sans changer grand-chose aux combats
@@ -59,18 +75,30 @@ const FULL_POPULATION := 1024.0
 @export var garrison_strength: float = 3.0
 @export var army_strength: float = 2.0
 @export var worker_strength: float = 0.25
-@export var mountain_defense: float = 2.0
+@export var terrain_defense: Dictionary[Terrain.Type, float] = {
+	Terrain.Type.MOUNTAIN: 2.0,
+	Terrain.Type.HILL: 1.5,
+}
 @export var force_ratio_exponent: float = 1.5
 ## Nombre maximal de colons en attente sur une case.
 @export var max_settlers: int = 32
 ## Durée (s) du trajet des colons et des troupes jusqu'à la case voisine ; ils n'y arrivent qu'ensuite.
 @export var travel_time: float = 1.0
 ## Or rapporté (ou coûté, si négatif) par chaque individu d'un rôle, à chaque cycle ; un worker d'une
-## ville rapporte city_gold_per_worker à la place.
+## ville rapporte city_gold_per_worker à la place, un worker de montagne mountain_gold_per_worker (le
+## meilleur des deux s'il est les deux).
 @export var gold_per_role: Dictionary[String, float] = {"worker": 2.0, "scientist": -1.0, "fighter": -1.0}
 @export var city_gold_per_worker: float = 3.0
-## Food produite par chaque worker d'un village, à chaque cycle (ceux d'une ville n'en produisent pas).
-@export var food_per_worker: float = 3.0
+@export var mountain_gold_per_worker: float = 3.0
+## Food produite par chaque worker d'un village, à chaque cycle, selon le terrain (ceux d'une ville n'en
+## produisent pas).
+@export var food_per_worker: Dictionary[Terrain.Type, float] = {
+	Terrain.Type.PRAIRIE: 4.0,
+	Terrain.Type.MOUNTAIN: 3.0,
+	Terrain.Type.FOREST: 3.0,
+	Terrain.Type.HILL: 2.5,
+	Terrain.Type.MARSH: 2.0,
+}
 ## Food consommée par chaque worker, scientist ou fighter de la garnison, à chaque cycle : dans un
 ## village, et dans une ville (un citadin mange plus : 6 villages pleins nourrissent juste une ville
 ## pleine).

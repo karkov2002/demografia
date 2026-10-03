@@ -10,6 +10,7 @@ extends SceneTree
 ##   players=pacifist,normal,aggressive,normal
 ##                             niveau de chaque IA (2 à 4 joueurs : pacifist, normal, aggressive)
 ##   size=10x10                taille de la carte
+##   map=continents            type de carte : islands, continents, lakes, mediterranean
 ##   minutes=30                durée maximale d'une partie (temps de jeu)
 ##   seed=1                    graine de la première partie (les suivantes : seed + 1, seed + 2…)
 ##   rules.<réglage>=<valeur>  change un réglage de GameRules (ex. rules.army_per_garrison=3)
@@ -22,6 +23,12 @@ extends SceneTree
 
 ## Instants (s de jeu) où le rapport relève les cases de chacun, pour mesurer la vitesse d'expansion.
 const SNAPSHOTS := [300.0, 600.0]
+const MAP_TYPES := {
+	"islands": MapGenerator.MapType.ISLANDS,
+	"continents": MapGenerator.MapType.CONTINENTS,
+	"lakes": MapGenerator.MapType.LAKES,
+	"mediterranean": MapGenerator.MapType.MEDITERRANEAN,
+}
 const LEVELS := {
 	"pacifist": AIProfile.Level.PACIFIST,
 	"normal": AIProfile.Level.NORMAL,
@@ -32,6 +39,7 @@ var _options := {
 	"games": "10",
 	"players": "pacifist,normal,aggressive,normal",
 	"size": "10x10",
+	"map": "continents",
 	"minutes": "30",
 	"seed": "1",
 	"report": "",
@@ -116,7 +124,7 @@ func _play(levels: Array[String], seed_value: int) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var world := World.new(rules)
-	MapGenerator.generate(world, rng, levels.size())
+	var starts := MapGenerator.generate(world, rng, MAP_TYPES[_options.map], levels.size())
 	var ais: Array[AIController] = []
 	for level in levels:
 		var profile: AIProfile = AIProfile.of_level(LEVELS[level]).duplicate()
@@ -124,10 +132,8 @@ func _play(levels: Array[String], seed_value: int) -> Dictionary:
 			_override(profile, property, _profile_overrides[level][property])
 		var player := world.add_player(true, profile.growth_factor)
 		ais.append(AIController.new(world, player.id, rng, profile))
-	for ai in ais:
-		var command := ai.choose_start()
-		if command != null:
-			world.execute(command)
+	for index in mini(starts.size(), ais.size()):
+		world.execute(StartCommand.new(index, starts[index]))
 
 	var result := {"duration": 0.0, "winner": World.NO_PLAYER, "battles": 0, "conquests": 0, "players": []}
 	var eliminated := {}
@@ -191,8 +197,8 @@ func _cells_by_player(world: World) -> Array[int]:
 ## Rapport en Markdown : réglages modifiés, chaque partie, puis les moyennes par niveau d'IA.
 func _report(levels: Array[String], results: Array[Dictionary]) -> String:
 	var lines: Array[String] = ["# Simulation d'équilibrage", ""]
-	lines.append("%d parties, joueurs : %s, carte %s, %s min au plus, graines %s à %d." % [results.size(),
-			", ".join(levels), _options.size, _options.minutes, _options.seed, int(_options.seed) + results.size() - 1])
+	lines.append("%d parties, joueurs : %s, carte %s %s, %s min au plus, graines %s à %d." % [results.size(),
+			", ".join(levels), _options.map, _options.size, _options.minutes, _options.seed, int(_options.seed) + results.size() - 1])
 	var changes: Array[String] = []
 	for property in _rule_overrides:
 		changes.append("rules.%s=%s" % [property, _rule_overrides[property]])

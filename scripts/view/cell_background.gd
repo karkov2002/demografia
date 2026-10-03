@@ -10,6 +10,9 @@ const TILES := {
 	Terrain.Type.PRAIRIE: preload("res://assets/tiles/prairie.png"),
 	Terrain.Type.MOUNTAIN: preload("res://assets/tiles/mountain.png"),
 	Terrain.Type.WATER: preload("res://assets/tiles/water.png"),
+	Terrain.Type.FOREST: preload("res://assets/tiles/forest.png"),
+	Terrain.Type.HILL: preload("res://assets/tiles/hill.png"),
+	Terrain.Type.MARSH: preload("res://assets/tiles/marsh.png"),
 }
 const FOG_TILE := preload("res://assets/tiles/fog.png")
 ## Couleur et nom de couleur de chaque joueur, par identifiant (l'ordre des joueurs fixe leur couleur) :

@@ -107,6 +107,7 @@ func _init() -> void:
 	_save(_trophy(), "victory")
 	_save(_broken_sword(), "defeat")
 	_save(_flag(), "colony")
+	_save(_white_flag(), "surrender")
 	for frame in WAR_FRAMES:
 		_save(_soldier(frame), "army_move_%d" % frame)
 		_save(_clash(frame), "clash_%d" % frame)
@@ -916,4 +917,34 @@ func _speaker(on: bool) -> Image:
 			cross.append(Vector2i(10 + i, 5 + i))
 			cross.append(Vector2i(14 - i, 5 + i))
 		_stroke(image, cross, WARNING)
+	return image
+
+
+## Drapeau blanc d'abandon, un peu déchiré, qui flotte au bout d'une hampe de bois plantée de biais.
+func _white_flag() -> Image:
+	const ROWS := [
+		"................",
+		"..W.............",
+		"..WOOOOOO.......",
+		"..WOccccOOO.....",
+		"..WOcccccccO....",
+		"..WOccccssccO...",
+		"..WOcccsscccO...",
+		"..WOccccccccO...",
+		"..WOOcccccOO....",
+		"..W..OOcOO......",
+		"..W....O........",
+		"..W.............",
+		"..W.............",
+		"..W.............",
+		".WWW............",
+		"................",
+	]
+	var colors := {"W": WOOD_DARK, "O": OUTLINE, "c": CANVAS, "s": CANVAS_SHADE}
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	for y in SIZE:
+		for x in SIZE:
+			var key: String = ROWS[y][x]
+			if colors.has(key):
+				image.set_pixel(x, y, colors[key])
 	return image

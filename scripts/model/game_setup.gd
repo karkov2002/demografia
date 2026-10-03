@@ -2,7 +2,9 @@ class_name GameSetup
 extends RefCounted
 ## Paramètres d'une nouvelle partie, choisis dans la fenêtre « New game » et lus au lancement du jeu.
 
-const MIN_SIZE := 2
+## Côté minimal absolu de la carte ; chaque type de carte a le sien, selon le nombre de joueurs (voir
+## MapGenerator.min_side).
+const MIN_SIZE := 4
 const MAX_SIZE := 20
 const MIN_PLAYERS := 2
 const MAX_PLAYERS := 4
@@ -13,6 +15,8 @@ static var current: GameSetup
 
 var columns: int = 10
 var rows: int = 10
+## Type de carte (MapGenerator.MapType).
+var map_type: int = MapGenerator.MapType.CONTINENTS
 ## Pour chaque joueur, dans l'ordre (qui fixe aussi son identifiant et sa couleur) : IA ou humain.
 ## Le premier est le joueur local, humain.
 var ai_players: Array[bool] = [false, true]

@@ -35,19 +35,6 @@ func _init(world: World, ai_player_id: int, rng: RandomNumberGenerator, ai_profi
 	_phase_left = _phase_duration()
 
 
-## Case de départ tirée au hasard parmi celles où le départ est permis (jamais sur l'eau).
-func choose_start() -> Command:
-	var candidates: Array[Vector2i] = []
-	for row in _world.rows:
-		for column in _world.columns:
-			var cell := Vector2i(column, row)
-			if _world.can_start_at(player_id, cell):
-				candidates.append(cell)
-	if candidates.is_empty():
-		return null
-	return StartCommand.new(player_id, candidates[_rng.randi_range(0, candidates.size() - 1)])
-
-
 ## Commandes à jouer après chaque cycle.
 func play_cycle() -> Array[Command]:
 	var commands: Array[Command] = []
@@ -90,15 +77,15 @@ func _threat(cell: Vector2i) -> int:
 	return threat
 
 
-## Scientists et fighters que peut nourrir et payer chaque worker (le moins favorable des deux). Dans
-## une ville (`city`), seul l'or compte : ses workers ne produisent pas de food, et ses voisines la
-## nourrissent quel que soit le rôle de ses habitants.
-func _support_per_worker(city: bool) -> float:
+## Scientists et fighters que peut nourrir et payer chaque worker de `cell` (le moins favorable des
+## deux), selon son terrain. Dans une ville, seul l'or compte : ses workers ne produisent pas de food, et
+## ses voisines la nourrissent quel que soit le rôle de ses habitants.
+func _support_per_worker(cell: Vector2i) -> float:
 	var rules := _world.rules
-	var by_food := INF if city else (rules.food_per_worker - rules.food_per_individual) / rules.food_per_individual
+	var by_food := INF if _world.is_city(cell) \
+			else (_world.food_per_worker(cell) - rules.food_per_individual) / rules.food_per_individual
 	var cost := -minf(rules.gold_per_role["scientist"], rules.gold_per_role["fighter"])
-	var worker_gold: float = rules.city_gold_per_worker if city else rules.gold_per_role["worker"]
-	var by_gold := worker_gold / cost if cost > 0.0 else INF
+	var by_gold := _world.worker_gold(cell) / cost if cost > 0.0 else INF
 	return minf(by_food, by_gold)
 
 
@@ -238,7 +225,7 @@ func _staff(cell: Vector2i, commands: Array[Command]) -> void:
 	var people := cell_population.whole("worker") + fighters + scientists
 	var city := _world.is_city(cell)
 	# Avec f fighters et s scientists : f + s ≤ k × (people - f - s), soit f + s ≤ k × people / (1 + k).
-	var support := _support_per_worker(city) * profile.budget_share
+	var support := _support_per_worker(cell) * profile.budget_share
 	var budget := floori(people * support / (1.0 + support))
 	var wanted_scientists := mini(floori(people * profile.science_ratio), budget) if city else 0
 	var wanted_fighters := mini(ceili(_threat(cell) * profile.garrison_ratio), budget - wanted_scientists)
@@ -320,8 +307,9 @@ func _colonize(commands: Array[Command]) -> void:
 		_action_wait = profile.action_delay * _jitter(profile.action_delay_jitter)
 
 
-## Case libre voisine de `cell` la plus intéressante à coloniser : prairie plutôt que montagne, et qui
-## ouvre le plus de terres libres. NO_CELL s'il n'y en a pas.
+## Case libre voisine de `cell` la plus intéressante à coloniser : grande capacité et bonne production de
+## food (la plaine avant la forêt, la colline, le marais et la montagne), et qui ouvre le plus de terres
+## libres. NO_CELL s'il n'y en a pas.
 func _best_free_neighbor(cell: Vector2i, claimed: Dictionary[Vector2i, bool]) -> Vector2i:
 	var best := World.NO_CELL
 	var best_score := -INF
@@ -329,7 +317,9 @@ func _best_free_neighbor(cell: Vector2i, claimed: Dictionary[Vector2i, bool]) ->
 		if claimed.has(neighbor) or _world.owner(neighbor) != World.NO_PLAYER or _world.capacity(neighbor) <= 0.0 \
 				or _world.is_at_war(neighbor) or _world.incoming(player_id, neighbor, false) > 0:
 			continue
-		var score := _world.terrain_capacity(neighbor) / _world.rules.capacity[Terrain.Type.PRAIRIE] + _rng.randf() * 0.05
+		var rules := _world.rules
+		var score := _world.terrain_capacity(neighbor) / rules.capacity[Terrain.Type.PRAIRIE] \
+				+ _world.food_per_worker(neighbor) / rules.food_per_worker[Terrain.Type.PRAIRIE] + _rng.randf() * 0.05
 		for around in _world.neighbors(neighbor):
 			if _world.owner(around) == World.NO_PLAYER and _world.capacity(around) > 0.0:
 				score += 0.1

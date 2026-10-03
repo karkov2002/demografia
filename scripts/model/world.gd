@@ -48,14 +48,10 @@ func _init(game_rules: GameRules) -> void:
 
 # --- Joueurs et brouillard de guerre -----------------------------------------------------------
 
-## Ajoute un joueur, à appeler une fois la carte générée : il connaît d'emblée les mers.
+## Ajoute un joueur. Il ne connaît encore rien de la carte, pas même l'eau : il la découvre autour de
+## ses cases.
 func add_player(is_ai: bool, growth_factor: float) -> Player:
 	var new_player := Player.new(players.size(), is_ai, growth_factor)
-	for row in rows:
-		for column in columns:
-			var cell := Vector2i(column, row)
-			if capacity(cell) <= 0.0:
-				new_player.explore(cell)
 	players.append(new_player)
 	return new_player
 
@@ -334,10 +330,22 @@ func cell_income(cell: Vector2i) -> float:
 	var income := 0.0
 	for role in rules.gold_per_role:
 		var gold: float = rules.gold_per_role[role]
-		if role == "worker" and is_city(cell):
-			gold = rules.city_gold_per_worker
+		if role == "worker":
+			gold = worker_gold(cell)
 		income += cell_population.whole(role) * gold
 	return income
+
+
+## Or rapporté par chaque worker de `cell` : rules.city_gold_per_worker dans une ville,
+## rules.mountain_gold_per_worker en montagne (le meilleur des deux pour une ville en montagne), sinon
+## celui de rules.gold_per_role.
+func worker_gold(cell: Vector2i) -> float:
+	var gold: float = rules.gold_per_role["worker"]
+	if is_city(cell):
+		gold = maxf(gold, rules.city_gold_per_worker)
+	if terrain(cell) == Terrain.Type.MOUNTAIN:
+		gold = maxf(gold, rules.mountain_gold_per_worker)
+	return gold
 
 
 ## Or rapporté au joueur par toutes ses cases à chaque cycle.
@@ -385,7 +393,7 @@ func _most_costly_cell(player_id: int) -> Vector2i:
 
 # --- Nourriture ----------------------------------------------------------------------------------
 
-## Solde de food de `cell` à chaque cycle : production des workers (dans un village seulement) moins la
+## Solde de food de `cell` à chaque cycle : production des workers (voir food_per_worker) moins la
 ## consommation de chaque worker, scientist ou fighter de la garnison (rules.food_per_individual, ou
 ## rules.city_food_per_individual dans une ville), et de la ration de sa troupe (rules.army_food). Les
 ## colons ne mangent pas. La troupe est ainsi nourrie par sa case avant que le surplus ne soit exporté.
@@ -396,9 +404,15 @@ func food_balance(cell: Vector2i) -> float:
 	var eaters := 0
 	for role in cell_population.counts:
 		eaters += cell_population.whole(role)
-	var produced := 0.0 if is_city(cell) else cell_population.whole("worker") * rules.food_per_worker
+	var produced := cell_population.whole("worker") * food_per_worker(cell)
 	var ration := rules.city_food_per_individual if is_city(cell) else rules.food_per_individual
 	return produced - eaters * ration - cell_population.army * rules.army_food
+
+
+## Food produite par chaque worker de `cell` : selon son terrain (rules.food_per_worker) dans un
+## village, aucune dans une ville.
+func food_per_worker(cell: Vector2i) -> float:
+	return 0.0 if is_city(cell) else rules.food_per_worker.get(terrain(cell), 0.0)
 
 
 ## Solde de food de toutes les cases du joueur.
@@ -853,9 +867,10 @@ func defender_strength(cell: Vector2i) -> float:
 	return strength * defense_bonus(cell)
 
 
-## Multiplicateur de la force du défenseur de `cell` : rules.mountain_defense en montagne, 1 sinon.
+## Multiplicateur de la force du défenseur de `cell` selon son terrain (rules.terrain_defense :
+## montagne, colline), 1 ailleurs.
 func defense_bonus(cell: Vector2i) -> float:
-	return rules.mountain_defense if terrain(cell) == Terrain.Type.MOUNTAIN else 1.0
+	return rules.terrain_defense.get(terrain(cell), 1.0)
 
 
 ## Multiplicateur de la force de la garnison de `cell` dû à ses remparts : rules.megapolis_defense dans une

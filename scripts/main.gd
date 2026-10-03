@@ -13,7 +13,6 @@ const MENU_SCENE := "res://scenes/menu.tscn"
 @onready var _population_stat: StatDisplay = $Layout/InfoPanel/InfoBox/StatsBar/PopulationStat
 @onready var _gold_stat: StatDisplay = $Layout/InfoPanel/InfoBox/StatsBar/GoldStat
 @onready var _food_stat: StatDisplay = $Layout/InfoPanel/InfoBox/StatsBar/FoodStat
-@onready var _start_button: Button = $Layout/InfoPanel/InfoBox/StartButton
 
 var _world: World
 var _clock: GameClock
@@ -42,7 +41,7 @@ func _ready() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
 	_world = World.new(game_rules)
-	MapGenerator.generate(_world, rng, setup.ai_players.size())
+	var starts := MapGenerator.generate(_world, rng, setup.map_type, setup.ai_players.size())
 	# Les joueurs sont créés dans l'ordre choisi, qui fixe leur identifiant et leur couleur ; le
 	# premier humain est le joueur local.
 	for index in setup.ai_players.size():
@@ -55,6 +54,9 @@ func _ready() -> void:
 			_ais.append(AIController.new(_world, player.id, rng, profile))
 		elif _human == null:
 			_human = player
+	# Chaque joueur, humain compris, démarre sur la case tirée au hasard pour lui par le générateur.
+	for index in mini(starts.size(), _world.players.size()):
+		_world.execute(StartCommand.new(index, starts[index]))
 	_clock = GameClock.new(rules.cycle_duration)
 	_clock.cycle.connect(_on_cycle)
 	_starvation_clock = GameClock.new(rules.starvation_interval)
@@ -72,10 +74,7 @@ func _ready() -> void:
 	_world.owner_changed.connect(_on_owner_changed)
 	_world.city_lost.connect(_on_city_lost)
 	_update_stats()
-	# Inactif tant qu'aucune case n'est sélectionnée.
-	_start_button.disabled = true
 	_map.cell_selected.connect(_on_cell_selected)
-	_start_button.pressed.connect(_on_start_pressed)
 	_preview.transfer_requested.connect(_on_transfer_requested)
 	_map.units_sent.connect(_on_units_sent)
 	_preview.boost_requested.connect(_on_boost_requested)
@@ -84,6 +83,14 @@ func _ready() -> void:
 	_preview.button_clicked.connect(_sounds.click)
 	_add_menu_button()
 	_add_sound_button()
+	# La partie commence aussitôt, la case de départ du joueur sélectionnée dans le zoom.
+	var home := _world.cells_of(_human.id)
+	if not home.is_empty():
+		_map.selected_cell = home[0]
+		_preview.cell = home[0]
+	_clock.running = true
+	_starvation_clock.running = true
+	_history.record(_world, _elapsed)
 
 
 func _process(delta: float) -> void:
@@ -104,9 +111,6 @@ func _on_cycle() -> void:
 
 
 func _on_cell_selected(cell: Vector2i) -> void:
-	# Pas de départ sur l'eau ; une montagne inexplorée reste possible, c'est le jeu. NO_CELL : plus de
-	# sélection (clic droit).
-	_start_button.disabled = cell == HexMap.NO_CELL or not _world.can_start_at(_human.id, cell)
 	_preview.cell = cell
 	# Bruits de mêlée quand on regarde une bataille en vue.
 	if _world.is_at_war(cell) and _world.is_visible(_human.id, cell):
@@ -127,20 +131,6 @@ func _on_owner_changed(_cell: Vector2i, previous_owner: int, new_owner: int, by_
 func _on_city_lost(cell: Vector2i, by_famine: bool) -> void:
 	if by_famine and _world.owner(cell) == _human.id:
 		_sounds.defeat()
-
-
-## L'humain choisit sa case en premier, puis chaque IA tire la sienne au hasard.
-func _on_start_pressed() -> void:
-	if not _world.execute(StartCommand.new(_human.id, _map.selected_cell)):
-		return
-	for ai in _ais:
-		var command := ai.choose_start()
-		if command != null:
-			_world.execute(command)
-	_start_button.hide()
-	_clock.running = true
-	_starvation_clock.running = true
-	_history.record(_world, _elapsed)
 
 
 ## Boost sur la case du zoom ; s'il a ajouté des workers, un « +N » s'envole du bouton et de la case.
@@ -208,6 +198,13 @@ func _check_game_over() -> void:
 	var human_eliminated := _world.has_started(_human.id) and _human.id not in _world.alive_players()
 	if _game_over or not (_world.is_game_over() or human_eliminated):
 		return
+	_end_game(_world.winner(), not human_eliminated, false)
+
+
+## Arrête la partie et ouvre la fenêtre de fin : gagnée par `winner_id` (World.NO_PLAYER : pas de
+## gagnant unique), le joueur local encore en lice ou non (`human_alive`), ou abandonnée par lui
+## (`abandoned`).
+func _end_game(winner_id: int, human_alive: bool, abandoned: bool) -> void:
 	_game_over = true
 	_clock.running = false
 	_starvation_clock.running = false
@@ -219,7 +216,7 @@ func _check_game_over() -> void:
 		colors[current.id] = CellBackground.PLAYER_COLORS[current.id]
 	var popup := GameOverPopup.new()
 	add_child(popup)
-	popup.setup(_history, _world.winner(), _human.id, not human_eliminated, names, colors)
+	popup.setup(_history, winner_id, _human.id, human_alive, names, colors, abandoned)
 	popup.menu_requested.connect(_go_to_menu)
 
 
@@ -255,7 +252,10 @@ func _ask_quit() -> void:
 	_quit_confirmation = ConfirmPopup.new()
 	add_child(_quit_confirmation)
 	_quit_confirmation.setup("Do you really want to quit ?", "", "No", "Yes")
-	_quit_confirmation.confirmed.connect(_go_to_menu)
+	_quit_confirmation.confirmed.connect(func() -> void:
+		_quit_confirmation.queue_free()
+		_quit_confirmation = null
+		_end_game(World.NO_PLAYER, true, true))
 	_quit_confirmation.cancelled.connect(func() -> void:
 		_clock.running = was_running
 		_starvation_clock.running = was_running
@@ -303,21 +303,9 @@ func _add_sound_button() -> void:
 		_update_sound_button())
 	add_child(_sound_button)
 	_update_sound_button()
-	# Au-dessus du bouton de départ tant qu'il est affiché, pour ne pas le recouvrir.
-	_start_button.visibility_changed.connect(_place_sound_button)
-	_place_sound_button.call_deferred()
 
 
 func _update_sound_button() -> void:
 	var muted := AudioServer.is_bus_mute(AudioServer.get_bus_index("Master"))
 	_sound_button.texture_normal = Icons.SOUND_OFF if muted else Icons.SOUND_ON
 	_sound_button.tooltip_text = "Remettre le son" if muted else "Couper le son"
-
-
-## Bouton son en bas à droite, remonté au-dessus du bouton de départ tant que celui-ci est affiché.
-func _place_sound_button() -> void:
-	const MARGIN := 10.0
-	var lift := _start_button.size.y + MARGIN if _start_button.visible else 0.0
-	var height := _sound_button.offset_bottom - _sound_button.offset_top
-	_sound_button.offset_bottom = -MARGIN - lift
-	_sound_button.offset_top = _sound_button.offset_bottom - height

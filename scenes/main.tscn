@@ -79,8 +79,3 @@ value_color = Color(0.72, 0.16, 0.16, 1)
 layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("2_sugp2")
-
-[node name="StartButton" type="Button" parent="Layout/InfoPanel/InfoBox" unique_id=725776519]
-custom_minimum_size = Vector2(0, 48)
-layout_mode = 2
-text = "Choisir la case de départ"

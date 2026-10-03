@@ -33,6 +33,17 @@ const FOOD_FLOW_FULL := 512.0
 const FRONTIER_WIDTH := 2.0
 const NEON_GLOW_LAYERS := 4
 const NEON_PULSE_RATE := 0.6
+## Fortifications des cases du joueur qui ont une garnison, le long de leurs frontières (pas entre deux
+## cases à lui) : palissade de pieux, puis mur de pierre crénelé à partir de WALL_STONE_GARRISON fighters.
+## Retrait (en rayons de case) vers l'intérieur de la case, et dimensions en rayons de case.
+const WALL_STONE_GARRISON := 100
+const WALL_INSET := 0.17
+const STAKE_SPACING := 0.1
+const STAKE_HEIGHT := 0.16
+const STONE_WIDTH := 0.12
+const WOOD_COLORS := [Color("5a3a20"), Color("8a5a30"), Color("b07a44")]
+const STONE_COLORS := [Color("4a4a52"), Color("8e8e98"), Color("b8b8c0")]
+const WALL_OUTLINE := Color("2a1e14")
 ## Position de la population d'une case sous son agglomération, en rayons de case sous son centre.
 const POPULATION_TEXT_OFFSET := 0.66
 ## Durée (s) du fondu du brouillard sur une case qui vient d'être découverte.
@@ -151,6 +162,13 @@ func _draw() -> void:
 	for i in visible_cells.size():
 		_draw_neon_line(frontiers[i], CellBackground.PLAYER_COLORS[world.owner(visible_cells[i])], width)
 	_draw_frontier_waves(visible_cells, frontiers, width, now)
+	# Fortifications des cases du joueur qui ont une garnison : une case sans garnison fait un trou dans
+	# la muraille (la garnison ennemie reste cachée).
+	for cell in world.cells_of(viewer_id):
+		var garrison := world.population(cell).whole("fighter")
+		if garrison > 0:
+			for line in _frontier_lines(cell, _hex_radius * WALL_INSET):
+				_draw_wall(line, garrison >= WALL_STONE_GARRISON)
 	# Population totale de chaque case en vue (celles du joueur comme les ennemies), sous son
 	# agglomération (voir CellBackground).
 	for cell in visible_cells:
@@ -476,3 +494,55 @@ func _draw_food_flows(now: float) -> void:
 					- Vector2(0.0, absf(sin(progress * TAU * 3.0)) * icon_size.y * 0.15)
 			draw_texture_rect(Icons.GRAIN_SACK, Rect2(center - icon_size / 2.0, icon_size), false,
 					Color(1.0, 1.0, 1.0, alpha))
+
+
+## Fortification le long de `line` : mur de pierre crénelé (`stone`), sinon palissade de pieux appointés,
+## dressés vers le haut de l'écran (vue de trois quarts) et éclairés à gauche.
+func _draw_wall(line: PackedVector2Array, stone: bool) -> void:
+	var outline_width := maxf(1.0, _hex_radius * 0.02)
+	if stone:
+		var band := _hex_radius * STONE_WIDTH
+		# Face du mur, plus sombre, sous le chemin de ronde : le mur a de la hauteur.
+		var face := PackedVector2Array()
+		for point in line:
+			face.append(point + Vector2(0.0, band * 0.6))
+		draw_polyline(face, WALL_OUTLINE, band + outline_width * 2.0, true)
+		draw_polyline(face, STONE_COLORS[0], band, true)
+		draw_polyline(line, WALL_OUTLINE, band + outline_width * 2.0, true)
+		draw_polyline(line, STONE_COLORS[1], band, true)
+	else:
+		draw_polyline(line, WALL_OUTLINE, outline_width * 2.5, true)
+	var spacing := _hex_radius * STAKE_SPACING
+	for i in line.size() - 1:
+		var a := line[i]
+		var b := line[i + 1]
+		var count := maxi(1, roundi(a.distance_to(b) / spacing))
+		for k in count:
+			var spot := a.lerp(b, (k + 0.5) / count)
+			if stone:
+				_draw_merlon(spot)
+			else:
+				_draw_stake(spot)
+
+
+## Pieu de palissade planté en `foot` : corps de bois éclairé à gauche, pointe en haut, cerné de sombre.
+func _draw_stake(foot: Vector2) -> void:
+	var w := _hex_radius * STAKE_SPACING * 0.7
+	var h := _hex_radius * STAKE_HEIGHT
+	var body := PackedVector2Array([foot + Vector2(-w / 2.0, 0.0), foot + Vector2(w / 2.0, 0.0),
+			foot + Vector2(w / 2.0, -h), foot + Vector2(0.0, -h - w * 0.7), foot + Vector2(-w / 2.0, -h)])
+	draw_colored_polygon(body, WOOD_COLORS[1])
+	draw_colored_polygon(PackedVector2Array([foot + Vector2(-w / 2.0, 0.0), foot + Vector2(-w / 2.0 + w * 0.35, 0.0),
+			foot + Vector2(-w / 2.0 + w * 0.35, -h - w * 0.45), foot + Vector2(-w / 2.0, -h)]), WOOD_COLORS[2])
+	body.append(body[0])
+	draw_polyline(body, WALL_OUTLINE, maxf(1.0, _hex_radius * 0.015), true)
+
+
+## Merlon de mur de pierre posé sur le chemin de ronde en `spot` : bloc éclairé à gauche, cerné de sombre.
+func _draw_merlon(spot: Vector2) -> void:
+	var s := _hex_radius * STONE_WIDTH * 0.8
+	var block := Rect2(spot + Vector2(-s / 2.0, -s * 1.2), Vector2(s, s))
+	draw_rect(block, STONE_COLORS[1])
+	draw_rect(Rect2(block.position, Vector2(s * 0.35, s)), STONE_COLORS[2])
+	draw_rect(Rect2(block.position + Vector2(0.0, s * 0.75), Vector2(s, s * 0.25)), STONE_COLORS[0])
+	draw_rect(block, WALL_OUTLINE, false, maxf(1.0, _hex_radius * 0.015))

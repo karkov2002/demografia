@@ -19,6 +19,17 @@ const SNOW_RAMP := ["c3cedb", "dfe6ef", "f4f7fa"]
 const WATER_RAMP := ["1e4f7a", "25628f", "2e76a3", "3a8bb5", "4f9fc4", "6db4d2", "93cadf"]
 const FOG_RAMP := ["2b2f3a", "343947", "3e4454", "4a5163", "575f73"]
 const FOAM := "e3f1f5"
+## Forêt : sous-bois sombre et frondaisons rondes (du creux d'ombre au reflet de lumière).
+const UNDERGROWTH_RAMP := ["24452c", "2c5233", "355f3b", "406c43"]
+const CANOPY_RAMP := ["1f4a2a", "2a5e33", "387340", "4c8a4c", "68a35a", "86b96b"]
+const TRUNK := "4a3424"
+## Colline : herbe des pentes (plus sèche que la plaine), crêtes claires.
+const HILL_RAMP := ["3f5e34", "4c6f3b", "5b8044", "6d914e", "82a35c", "9bb56d", "b5c784"]
+## Marais : sol vaseux, mares sombres, roseaux et massettes.
+const MARSH_RAMP := ["3a4430", "445036", "4f5c3c", "5b6943", "68774b"]
+const POOL_RAMP := ["26403f", "2e4f4b", "3a5f58", "4f766b", "6f9585"]
+const REED := ["556b2f", "7a8f3e", "9aab52"]
+const CATTAIL := "6b4a2a"
 
 ## Matrice de Bayer 4×4, pour le tramage ordonné.
 const BAYER := [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
@@ -29,6 +40,9 @@ func _init() -> void:
 	_save(_prairie(), "prairie")
 	_save(_mountain(), "mountain")
 	_save(_water(), "water")
+	_save(_forest(), "forest")
+	_save(_hill(), "hill")
+	_save(_marsh(), "marsh")
 	_save(_fog(), "fog")
 	quit()
 
@@ -188,3 +202,99 @@ func _water() -> Image:
 ## Brouillard de guerre : nappes grises bleutées, sans lumière directionnelle.
 func _fog() -> Image:
 	return _textured(4, FOG_RAMP, 0.0)
+
+
+## Forêt : sous-bois sombre couvert de frondaisons rondes qui se chevauchent, des plus lointaines (en
+## haut) aux plus proches, chacune éclairée en haut à gauche, avec l'ombre de son tronc au pied.
+func _forest() -> Image:
+	var image := _textured(5, UNDERGROWTH_RAMP, 0.25)
+	var noise := SmoothNoise.new(55)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 55
+	var crowns: Array[Vector2i] = []
+	for i in 70:
+		crowns.append(_random_spot(rng, 4))
+	crowns.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return a.y < b.y)
+	for crown in crowns:
+		var radius := rng.randf_range(3.0, 4.6)
+		_plot(image, crown.x, crown.y + roundi(radius), TRUNK)
+		_plot(image, crown.x + 1, crown.y + roundi(radius) + 1, UNDERGROWTH_RAMP[0])
+		for y in range(crown.y - 5, crown.y + 5):
+			for x in range(crown.x - 5, crown.x + 5):
+				var offset := Vector2(x + 0.5 - crown.x, y + 0.5 - crown.y)
+				if offset.length() > radius:
+					continue
+				# Lumière d'en haut à gauche sur le dôme, assombri vers le bas à droite.
+				var value := 0.62 - (offset.x + offset.y) / (radius * 3.2) + (noise.sample(x * 1.5, y * 1.5) - 0.5) * 0.3
+				if offset.length() > radius - 1.0 and offset.x + offset.y > 0.0:
+					value -= 0.25
+				_plot(image, x, y, _shade(CANOPY_RAMP, value, x, y))
+	return image
+
+
+## Colline : herbe sèche ondulée, avec trois croupes arrondies éclairées sur leur versant gauche, une
+## crête claire et un pied dans l'ombre, et quelques cailloux.
+func _hill() -> Image:
+	var image := _textured(6, HILL_RAMP, 0.3)
+	var noise := SmoothNoise.new(66)
+	for mound in [[Vector2(13.0, 21.0), 11.0, 8.0], [Vector2(30.0, 18.0), 10.0, 7.0], [Vector2(22.0, 35.0), 14.0, 9.0]]:
+		var center: Vector2 = mound[0]
+		var half: float = mound[1]
+		var height: float = mound[2]
+		for y in range(int(center.y - height) - 1, int(center.y) + 2):
+			for x in range(int(center.x - half), int(center.x + half) + 1):
+				var u := (x + 0.5 - center.x) / half
+				if absf(u) > 1.0:
+					continue
+				# Profil en cloche : la croupe monte jusqu'à `height` pixels au-dessus de son pied.
+				var top := center.y - height * (1.0 - u * u)
+				if y + 0.5 < top or y > center.y:
+					continue
+				var value := 0.7 - u * 0.75 + (noise.sample(x, y) - 0.5) * 0.15
+				if y + 0.5 - top < 1.2:
+					value += 0.3
+				if y >= int(center.y):
+					value = 0.0
+				_plot(image, x, y, _shade(HILL_RAMP, value, x, y))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 67
+	for i in 5:
+		var spot := _random_spot(rng, 3)
+		_plot(image, spot.x, spot.y, ROCK_RAMP[4])
+		_plot(image, spot.x + 1, spot.y, ROCK_RAMP[2])
+		_plot(image, spot.x + 1, spot.y + 1, HILL_RAMP[0])
+	return image
+
+
+## Marais : sol vaseux, mares sombres aux reflets clairs, touffes de roseaux et massettes brunes.
+func _marsh() -> Image:
+	var image := _textured(7, MARSH_RAMP, 0.25)
+	var noise := SmoothNoise.new(77)
+	for pool in [[Vector2(13.0, 17.0), 7.5, 4.0], [Vector2(28.0, 25.0), 8.5, 4.5], [Vector2(16.0, 34.0), 7.0, 3.5]]:
+		var center: Vector2 = pool[0]
+		var radii := Vector2(pool[1], pool[2])
+		for y in range(int(center.y - radii.y) - 1, int(center.y + radii.y) + 2):
+			for x in range(int(center.x - radii.x) - 1, int(center.x + radii.x) + 2):
+				var offset := (Vector2(x + 0.5, y + 0.5) - center) / radii
+				var edge := offset.length() + (noise.sample(x * 2.0, y * 2.0) - 0.5) * 0.4
+				if edge > 1.0:
+					continue
+				var value := 0.35 + offset.y * 0.2 + (noise.sample(x, y) - 0.5) * 0.2
+				if edge > 0.85:
+					value = 0.05
+				_plot(image, x, y, _shade(POOL_RAMP, value, x, y))
+		# Reflet du ciel sur l'eau.
+		for dx in range(-1, 2):
+			_plot(image, int(center.x) + dx - 1, int(center.y) - 1, POOL_RAMP[4])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 78
+	for i in 9:
+		var spot := _random_spot(rng, 4)
+		for blade in [-1, 0, 1]:
+			var height := 3 + (1 if blade == 0 else 0)
+			for k in height:
+				_plot(image, spot.x + blade, spot.y - k, REED[clampi(k, 0, REED.size() - 1)])
+		if i % 2 == 0:
+			_plot(image, spot.x, spot.y - 4, CATTAIL)
+			_plot(image, spot.x, spot.y - 5, CATTAIL)
+	return image

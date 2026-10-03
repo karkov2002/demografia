@@ -1,6 +1,6 @@
 class_name NewGamePopup
 extends ModalPopup
-## Fenêtre « New game » : taille de la carte, nombre de joueurs et type de chaque joueur (le premier est
+## Fenêtre « New game » : type et taille de la carte, nombre de joueurs et type de chaque joueur (le premier est
 ## le joueur local, humain ; les autres sont des IA, pacifiste, normale ou agressive, un autre joueur
 ## humain n'étant pas encore possible). Elle se ferme par la croix en haut à droite, ou par Échap.
 
@@ -17,6 +17,7 @@ const AI_ITEMS := {
 }
 const HUMAN_ITEM := 100
 
+var _map_type: OptionButton
 var _width: SpinBox
 var _height: SpinBox
 var _player_count: SpinBox
@@ -45,10 +46,20 @@ func _ready() -> void:
 	settings.add_theme_constant_override("h_separation", 16)
 	settings.add_theme_constant_override("v_separation", 8)
 	content.add_child(settings)
+	settings.add_child(_label("Type de carte", 15, INK, HORIZONTAL_ALIGNMENT_LEFT))
+	_map_type = OptionButton.new()
+	for type in MapGenerator.MAP_TYPE_NAMES:
+		_map_type.add_item(MapGenerator.MAP_TYPE_NAMES[type], type)
+	_map_type.select(_map_type.get_item_index(MapGenerator.MapType.CONTINENTS))
+	_map_type.item_selected.connect(func(_index: int) -> void: _update_min_size())
+	settings.add_child(_map_type)
 	_width = _add_spin(settings, "Largeur de la carte", GameSetup.MIN_SIZE, GameSetup.MAX_SIZE, 10)
 	_height = _add_spin(settings, "Hauteur de la carte", GameSetup.MIN_SIZE, GameSetup.MAX_SIZE, 10)
 	_player_count = _add_spin(settings, "Nombre de joueurs", GameSetup.MIN_PLAYERS, GameSetup.MAX_PLAYERS, 2)
-	_player_count.value_changed.connect(func(_value: float) -> void: _rebuild_players())
+	_player_count.value_changed.connect(func(_value: float) -> void:
+		_rebuild_players()
+		_update_min_size())
+	_update_min_size()
 
 	content.add_child(_label("Joueurs", 16, MUTED_INK, HORIZONTAL_ALIGNMENT_LEFT))
 	_players_box = VBoxContainer.new()
@@ -59,6 +70,15 @@ func _ready() -> void:
 	var start := _main_button("Lancer la partie")
 	start.pressed.connect(_on_start_pressed)
 	content.add_child(start)
+
+
+## Taille minimale de la carte selon son type et le nombre de joueurs (voir MapGenerator.min_side) : la
+## largeur et la hauteur sont relevées si besoin.
+func _update_min_size() -> void:
+	var side := MapGenerator.min_side(_map_type.get_selected_id(), int(_player_count.value))
+	for spin in [_width, _height]:
+		spin.min_value = side
+		spin.tooltip_text = "Au moins %d pour ce type de carte et ce nombre de joueurs." % side
 
 
 func _add_spin(grid: GridContainer, text: String, minimum: int, maximum: int, value: int) -> SpinBox:
@@ -119,6 +139,7 @@ func _on_start_pressed() -> void:
 	var setup := GameSetup.new()
 	setup.columns = int(_width.value)
 	setup.rows = int(_height.value)
+	setup.map_type = _map_type.get_selected_id()
 	setup.ai_players.clear()
 	setup.ai_levels.clear()
 	for option in _types:
