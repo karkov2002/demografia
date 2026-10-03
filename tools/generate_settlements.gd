@@ -7,6 +7,8 @@ extends SceneTree
 ## - `_base` : les bâtiments dans leurs couleurs naturelles (pierre, torchis, chaume, terre cuite) ;
 ## - `_roof` : les toits et bannières en niveaux de gris, que le jeu teinte à la couleur du joueur et pose
 ##   par-dessus, en partie transparents pour garder la matière des toits.
+## S'y ajoutent les champs qui entourent un village (`_fields_N`, un seul calque, posé sous le village),
+## de plus en plus nombreux à mesure qu'il grandit : l'image N montre les N premières parcelles.
 ## À relancer après modification :
 ##   godot --headless --path . -s res://tools/generate_settlements.gd
 
@@ -25,6 +27,20 @@ const OPENING := "2e241c"
 const WOOD := "4e3826"
 ## Ombre portée sur le sol.
 const SHADOW := Color(0.05, 0.08, 0.03, 0.38)
+## Champs : blé mûr (rangs de sillons, du creux au sommet), jeune pousse verte, et terre des talus.
+const WHEAT := ["9a7a2e", "c49a3c", "dcb850", "eed27a"]
+const SPROUT := ["4f7a32", "6a943e", "86ad4e"]
+const SOIL := "6e5434"
+## Parcelles des champs autour des huttes, dans l'ordre où elles apparaissent quand le village grandit :
+## [zone, culture (true = blé mûr, false = jeunes pousses)].
+const FIELD_PARCELS := [
+	[Rect2i(3, 15, 8, 8), true],
+	[Rect2i(31, 25, 8, 8), true],
+	[Rect2i(13, 35, 8, 5), true],
+	[Rect2i(4, 25, 8, 8), false],
+	[Rect2i(32, 14, 7, 9), true],
+	[Rect2i(23, 36, 7, 4), false],
+]
 
 
 func _init() -> void:
@@ -32,6 +48,10 @@ func _init() -> void:
 	_save_layers(_antiquity_village(), "antiquity_village")
 	_save_layers(_antiquity_town(), "antiquity_town")
 	_save_layers(_antiquity_megapolis(), "antiquity_megapolis")
+	for stage in range(1, FIELD_PARCELS.size() + 1):
+		var path := OUT_DIR + "antiquity_fields_%d.png" % stage
+		_antiquity_fields(stage).save_png(ProjectSettings.globalize_path(path))
+		print("Champs générés : ", path)
 	quit()
 
 
@@ -270,3 +290,42 @@ func _antiquity_megapolis() -> Array[Image]:
 	_house(layers, 27, 30, 6, 3, 3)
 	_rampart(layers, 5, 36, 35, 4, 4)
 	return layers
+
+
+## Champs d'un village, autour des huttes (qui occupent le centre de la tuile) : les `stage` premières
+## parcelles de FIELD_PARCELS, de blé mûr ou de jeunes pousses, aux sillons horizontaux, bordées d'un
+## talus de terre au pied, dans l'hexagone de la tuile.
+func _antiquity_fields(stage: int) -> Image:
+	var image := Image.create_empty(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	for i in stage:
+		_field(image, FIELD_PARCELS[i][0], WHEAT if FIELD_PARCELS[i][1] else SPROUT)
+	return image
+
+
+## Parcelle `rect` de la culture `ramp` (du creux au sommet des sillons) : un sillon sur deux plus clair,
+## éclairée à gauche, talus de terre sur sa ligne du bas. Les pixels hors de l'hexagone de la tuile sont
+## laissés vides.
+func _field(image: Image, rect: Rect2i, ramp: Array) -> void:
+	for y in range(rect.position.y, rect.end.y):
+		for x in range(rect.position.x, rect.end.x):
+			if not _in_tile(x, y):
+				continue
+			var color: String
+			if y == rect.end.y - 1:
+				color = SOIL
+			else:
+				var rank := 1 + (1 if (y - rect.position.y) % 2 == 0 else 0)
+				if x == rect.position.x:
+					rank += 1
+				elif x == rect.end.x - 1:
+					rank -= 1
+				color = ramp[clampi(rank, 0, ramp.size() - 1)]
+			_plot(image, x, y, color)
+
+
+## Le pixel (`x`, `y`) est-il dans l'hexagone (pointe en haut) de la tuile, avec un pixel de marge ?
+func _in_tile(x: int, y: int) -> bool:
+	var center := Vector2(WIDTH / 2.0, HEIGHT / 2.0)
+	var offset := (Vector2(x + 0.5, y + 0.5) - center).abs()
+	var radius := HEIGHT / 2.0 - 1.0
+	return offset.x <= radius * sqrt(3.0) / 2.0 - 1.0 and offset.y + offset.x / sqrt(3.0) <= radius

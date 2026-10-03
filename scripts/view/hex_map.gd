@@ -3,7 +3,7 @@ extends Control
 ## Carte du monde : grille d'hexagones cliquables, redimensionnée pour tenir entièrement dans le contrôle.
 ## Disposition « odd-r » : hexagones pointe en haut, rangées impaires décalées d'une demi-case.
 
-## Émis au clic sur une case (indices à partir de 0).
+## Émis au clic sur une case (indices à partir de 0), ou avec NO_CELL au clic droit, qui désélectionne.
 signal cell_selected(cell: Vector2i)
 ## Émis au clic sur une case cible (chariot, déplacement ou épée) : les colons et la troupe de la case sélectionnée
 ## doivent y partir.
@@ -22,6 +22,12 @@ const SETTLER_TARGET_BACKGROUND := Color(0.0, 0.0, 0.0, 0.45)
 const CONVOY_SIZE := 0.5
 const CONVOY_FADE := 0.25
 const CONVOY_FPS := 8.0
+## Flux de food entre deux cases du joueur : un sac de grain glisse de l'exportatrice vers sa voisine en
+## FOOD_FLOW_PERIOD secondes, en boucle, avec un fondu aux deux bouts ; sa taille (en rayons de case) va
+## de FOOD_FLOW_SIZE[0] à FOOD_FLOW_SIZE[1] selon la quantité, pleine à FOOD_FLOW_FULL par cycle.
+const FOOD_FLOW_PERIOD := 1.6
+const FOOD_FLOW_SIZE := [0.32, 0.48]
+const FOOD_FLOW_FULL := 512.0
 ## Frontières des joueurs, au néon : largeur du trait (en multiple de border_width), couches du halo
 ## lumineux autour, et pulsation de ce halo (par seconde).
 const FRONTIER_WIDTH := 2.0
@@ -168,6 +174,18 @@ func _draw() -> void:
 			var icon_size := Vector2.ONE * _hex_radius * 0.7
 			var icon_center := cell_center(cell) + Vector2(0.0, _hex_radius * 0.5)
 			draw_texture_rect(Icons.STARVATION, Rect2(icon_center - icon_size / 2.0, icon_size), false)
+	# Petit soldat qui marche sur place en haut à gauche des cases du joueur où une armée est prête à
+	# partir (celles des ennemis restent cachées : on n'en voit que la population totale).
+	var march_frame := int(now * CONVOY_FPS * 0.5) % Icons.ARMY_MOVE.size()
+	for cell in world.cells_of(viewer_id):
+		if world.population(cell).army > 0:
+			var soldier_size := Vector2.ONE * _hex_radius * 0.5
+			var soldier_center := cell_center(cell) + Vector2(-_hex_radius * 0.45, -_hex_radius * 0.3)
+			draw_circle(soldier_center, soldier_size.x * 0.5, Color(1.0, 0.97, 0.88, 0.85))
+			draw_arc(soldier_center, soldier_size.x * 0.5, 0.0, TAU, 24, PopulationText.OUTLINE_COLOR,
+					maxf(1.5, _hex_radius * 0.04), true)
+			draw_texture_rect(Icons.ARMY_MOVE[march_frame], Rect2(soldier_center - soldier_size / 2.0, soldier_size),
+					false)
 	# Flèche qui sautille sur les villages pleins du joueur, qui peuvent passer en ville.
 	for cell in world.cells_of(viewer_id):
 		if world.can_found_city(viewer_id, cell):
@@ -183,6 +201,7 @@ func _draw() -> void:
 	for cell in army_targets:
 		var icon := Icons.MARCH if world.owner(cell) == viewer_id else Icons.SWORD
 		_draw_target(cell, icon, 1.0 if cell in settler_targets else 0.0)
+	_draw_food_flows(now)
 	_draw_convoys()
 	_effects.draw(self, font, cell_center, _hex_radius)
 
@@ -399,6 +418,14 @@ func _draw_outline(cell: Vector2i, color: Color, inset: float = 0.0, width: floa
 func _gui_input(event: InputEvent) -> void:
 	if world == null:
 		return
+	# Clic droit : plus aucune case sélectionnée.
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+		if selected_cell != NO_CELL:
+			selected_cell = NO_CELL
+			queue_redraw()
+			cell_selected.emit(NO_CELL)
+		accept_event()
+		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var cell := cell_at(event.position)
 		var is_target := cell in world.colonization_targets(viewer_id, selected_cell) \
@@ -428,3 +455,24 @@ func _draw_upgrade_arrow(center: Vector2, now: float) -> void:
 	draw_colored_polygon(points, COLOR.lerp(Color.WHITE, 0.3 * bounce))
 	points.append(points[0])
 	draw_polyline(points, PopulationText.OUTLINE_COLOR, maxf(1.5, size * 0.1), true)
+
+
+## Food que s'envoient les cases du joueur : un sac de grain par flux, qui glisse en boucle de la case
+## qui exporte vers celle qui reçoit (voir World.food_exports), plus gros quand le flux est fort. Chaque
+## flux a son propre décalage dans le temps, pour que les sacs ne partent pas tous ensemble. Seuls les
+## flux du joueur sont montrés (rien n'est révélé de l'économie ennemie).
+func _draw_food_flows(now: float) -> void:
+	for cell in world.cells_of(viewer_id):
+		var exports := world.food_exports(cell)
+		for neighbor in exports:
+			var amount: float = exports[neighbor]
+			var offset := float(absi(hash([cell, neighbor])) % 1000) / 1000.0
+			var progress := fmod(now / FOOD_FLOW_PERIOD + offset, 1.0)
+			var alpha := clampf(minf(progress, 1.0 - progress) / CONVOY_FADE, 0.0, 1.0)
+			var weight := clampf(amount / FOOD_FLOW_FULL, 0.0, 1.0)
+			var icon_size := Vector2.ONE * _hex_radius * lerpf(FOOD_FLOW_SIZE[0], FOOD_FLOW_SIZE[1], weight)
+			# Petit cahot, comme porté à dos d'homme.
+			var center := cell_center(cell).lerp(cell_center(neighbor), progress) \
+					- Vector2(0.0, absf(sin(progress * TAU * 3.0)) * icon_size.y * 0.15)
+			draw_texture_rect(Icons.GRAIN_SACK, Rect2(center - icon_size / 2.0, icon_size), false,
+					Color(1.0, 1.0, 1.0, alpha))

@@ -27,9 +27,11 @@ var _population_at_cycle_start: int = 0
 var _history := GameHistory.new()
 var _elapsed: float = 0.0
 var _game_over: bool = false
-## Fenêtre « Retourner au menu ? » ouverte par Échap, ou null.
+## Fenêtre « Do you really want to quit ? » ouverte par Échap ou Menu > Quitter, ou null.
 var _quit_confirmation: ConfirmPopup
 var _sounds := SoundFx.new()
+## Bouton son (haut-parleur), en bas à droite de l'écran.
+var _sound_button: TextureButton
 
 
 func _ready() -> void:
@@ -80,6 +82,8 @@ func _ready() -> void:
 	_preview.city_requested.connect(_on_city_requested)
 	_preview.downgrade_requested.connect(_on_downgrade_requested)
 	_preview.button_clicked.connect(_sounds.click)
+	_add_menu_button()
+	_add_sound_button()
 
 
 func _process(delta: float) -> void:
@@ -100,8 +104,9 @@ func _on_cycle() -> void:
 
 
 func _on_cell_selected(cell: Vector2i) -> void:
-	# Pas de départ sur l'eau ; une montagne inexplorée reste possible, c'est le jeu.
-	_start_button.disabled = not _world.can_start_at(_human.id, cell)
+	# Pas de départ sur l'eau ; une montagne inexplorée reste possible, c'est le jeu. NO_CELL : plus de
+	# sélection (clic droit).
+	_start_button.disabled = cell == HexMap.NO_CELL or not _world.can_start_at(_human.id, cell)
 	_preview.cell = cell
 	# Bruits de mêlée quand on regarde une bataille en vue.
 	if _world.is_at_war(cell) and _world.is_visible(_human.id, cell):
@@ -228,12 +233,19 @@ func _player_name(player: Player) -> String:
 	return "IA %s" % CellBackground.PLAYER_COLOR_NAMES[player.id]
 
 
-## Échap : en fin de partie, retour direct au menu ; sinon, pause et confirmation, car la partie en cours
-## serait perdue.
+## Échap : comme Menu > Quitter (voir _ask_quit).
 func _unhandled_input(event: InputEvent) -> void:
 	if not event.is_action_pressed("ui_cancel") or _quit_confirmation != null:
 		return
 	get_viewport().set_input_as_handled()
+	_ask_quit()
+
+
+## Quitter la partie : en fin de partie, retour direct au menu ; sinon, pause et confirmation, car la
+## partie en cours serait perdue.
+func _ask_quit() -> void:
+	if _quit_confirmation != null:
+		return
 	if _game_over:
 		_go_to_menu()
 		return
@@ -242,7 +254,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	_starvation_clock.running = false
 	_quit_confirmation = ConfirmPopup.new()
 	add_child(_quit_confirmation)
-	_quit_confirmation.setup("Retourner au menu ?", "La partie en cours sera perdue.", "Continuer", "Menu principal")
+	_quit_confirmation.setup("Do you really want to quit ?", "", "No", "Yes")
 	_quit_confirmation.confirmed.connect(_go_to_menu)
 	_quit_confirmation.cancelled.connect(func() -> void:
 		_clock.running = was_running
@@ -252,3 +264,60 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _go_to_menu() -> void:
 	get_tree().change_scene_to_file(MENU_SCENE)
+
+
+## Bouton « Menu » au bout de la barre d'action, en haut du panneau de droite : pour l'instant un seul
+## choix, « Quitter », qui ramène au menu principal après confirmation (voir _ask_quit).
+func _add_menu_button() -> void:
+	const QUIT_ID := 0
+	var menu := MenuButton.new()
+	menu.text = "Menu"
+	menu.flat = false
+	menu.focus_mode = Control.FOCUS_NONE
+	menu.get_popup().add_item("Quitter", QUIT_ID)
+	menu.get_popup().id_pressed.connect(func(id: int) -> void:
+		if id == QUIT_ID:
+			_ask_quit())
+	$Layout/InfoPanel/InfoBox/StatsBar.add_child(menu)
+
+
+## Bouton son en bas à droite de l'écran : un clic coupe tous les sons du jeu (bruitages et musique) et
+## barre le haut-parleur, un autre les remet. C'est le bus principal qui est rendu muet : le réglage
+## tient jusqu'au menu et dans les parties suivantes.
+func _add_sound_button() -> void:
+	const BUTTON_SIZE := 36.0
+	const MARGIN := 10.0
+	_sound_button = TextureButton.new()
+	_sound_button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_sound_button.ignore_texture_size = true
+	_sound_button.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	_sound_button.focus_mode = Control.FOCUS_NONE
+	_sound_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	_sound_button.offset_left = -MARGIN - BUTTON_SIZE
+	_sound_button.offset_top = -MARGIN - BUTTON_SIZE
+	_sound_button.offset_right = -MARGIN
+	_sound_button.offset_bottom = -MARGIN
+	_sound_button.pressed.connect(func() -> void:
+		var master := AudioServer.get_bus_index("Master")
+		AudioServer.set_bus_mute(master, not AudioServer.is_bus_mute(master))
+		_update_sound_button())
+	add_child(_sound_button)
+	_update_sound_button()
+	# Au-dessus du bouton de départ tant qu'il est affiché, pour ne pas le recouvrir.
+	_start_button.visibility_changed.connect(_place_sound_button)
+	_place_sound_button.call_deferred()
+
+
+func _update_sound_button() -> void:
+	var muted := AudioServer.is_bus_mute(AudioServer.get_bus_index("Master"))
+	_sound_button.texture_normal = Icons.SOUND_OFF if muted else Icons.SOUND_ON
+	_sound_button.tooltip_text = "Remettre le son" if muted else "Couper le son"
+
+
+## Bouton son en bas à droite, remonté au-dessus du bouton de départ tant que celui-ci est affiché.
+func _place_sound_button() -> void:
+	const MARGIN := 10.0
+	var lift := _start_button.size.y + MARGIN if _start_button.visible else 0.0
+	var height := _sound_button.offset_bottom - _sound_button.offset_top
+	_sound_button.offset_bottom = -MARGIN - lift
+	_sound_button.offset_top = _sound_button.offset_bottom - height

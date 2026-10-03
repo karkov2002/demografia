@@ -55,6 +55,11 @@ const FOOD := preload("res://assets/icons/food.png")
 const STARVATION := preload("res://assets/icons/starvation.png")
 ## Bouton Boost.
 const BOOST := preload("res://assets/icons/boost.png")
+## Sac de grain : la food qui part d'une case vers une voisine dans le besoin (animation sur la carte).
+const GRAIN_SACK := preload("res://assets/icons/grain_sack.png")
+## Haut-parleur du bouton son : actif, ou barré quand le jeu est muet.
+const SOUND_ON := preload("res://assets/icons/sound_on.png")
+const SOUND_OFF := preload("res://assets/icons/sound_off.png")
 ## Rôles dans le zoom de la case : scientist (fiole) et garnison (tour de château).
 const SCIENTIST := preload("res://assets/icons/scientist.png")
 const GARRISON := preload("res://assets/icons/garrison.png")

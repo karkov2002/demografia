@@ -140,6 +140,9 @@ func _init() -> void:
 	_save(_food_trend(Vector2i.UP, ARROW_UP), "food_up")
 	_save(_food_trend(Vector2i.RIGHT, ARROW_FLAT), "food_flat")
 	_save(_food_trend(Vector2i.DOWN, ARROW_DOWN), "food_down")
+	_save(_grain_sack(), "grain_sack")
+	_save(_speaker(true), "sound_on")
+	_save(_speaker(false), "sound_off")
 	quit()
 
 
@@ -841,4 +844,76 @@ func _tower() -> Image:
 		for x in range(6, 10):
 			if y > 11 or x in [7, 8]:
 				image.set_pixel(x, y, DOORWAY)
+	return image
+
+
+## Sac de grain en toile de jute, aux épaules larges et au fond plat, ficelé au col, d'où dépassent des
+## épis de blé dorés : la food qui part des villages vers les villes.
+func _grain_sack() -> Image:
+	const BURLAP := Color("d9b77e")
+	const BURLAP_SHADE := Color("b08a50")
+	const BURLAP_OUTLINE := Color("5a3a1e")
+	# Demi-largeur de la panse à chaque ligne, du col au fond.
+	const HALVES := {5: 1.5, 6: 3.0, 7: 4.5, 8: 5.5, 9: 5.5, 10: 5.5, 11: 5.5, 12: 5.5, 13: 5.5, 14: 5.0}
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	# Épis qui dépassent du col : tige, puis grain doré en haut.
+	for ear in [Vector2i(6, 1), Vector2i(8, 0), Vector2i(10, 1)]:
+		_shape(image,
+				func(x: int, y: int) -> bool:
+					return y >= ear.y and y <= 5 and (x == ear.x or (absi(x - ear.x) == 1 and y <= ear.y + 2)),
+				func(x: int, _y: int) -> Color:
+					return GOLD_SHINE if x < ear.x else GOLD,
+				GOLD_OUTLINE)
+	_shape(image,
+			func(x: int, y: int) -> bool:
+				return HALVES.has(y) and absf(x + 0.5 - 8.0) <= HALVES[y],
+			func(x: int, y: int) -> Color:
+				return BURLAP_SHADE if x >= 10 or y == 13 else BURLAP,
+			BURLAP_OUTLINE)
+	# Ficelle au col.
+	for x in range(6, 11):
+		image.set_pixel(x, 6, WOOD_DARK)
+	return image
+
+
+## Haut-parleur clair, pavillon évasé vers la droite ; avec `on`, deux ondes sonores, sinon une croix
+## rouge (son coupé). Dessiné pixel par pixel : O contour, L clair, S ombre.
+func _speaker(on: bool) -> Image:
+	const ROWS := [
+		"................",
+		"........O.......",
+		".......OO.......",
+		"......OLO.......",
+		".....OLLO.......",
+		".OOOOLLLO.......",
+		".OSLLLLLO.......",
+		".OSLLLLLO.......",
+		".OSLLLLLO.......",
+		".OSLLLLLO.......",
+		".OOOOLLLO.......",
+		".....OLLO.......",
+		"......OLO.......",
+		".......OO.......",
+		"........O.......",
+		"................",
+	]
+	const COLORS := {"O": ARROW_OUTLINE, "L": BLADE, "S": STONE_SHADE}
+	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	for y in SIZE:
+		for x in SIZE:
+			var key: String = ROWS[y][x]
+			if COLORS.has(key):
+				image.set_pixel(x, y, COLORS[key])
+	if on:
+		_stroke(image, [Vector2i(10, 5), Vector2i(11, 6), Vector2i(11, 7), Vector2i(11, 8), Vector2i(11, 9),
+				Vector2i(10, 10)], GLASS_SHINE)
+		_stroke(image, [Vector2i(12, 2), Vector2i(13, 3), Vector2i(14, 4), Vector2i(14, 5), Vector2i(14, 6),
+				Vector2i(14, 7), Vector2i(14, 8), Vector2i(14, 9), Vector2i(14, 10), Vector2i(14, 11),
+				Vector2i(13, 12), Vector2i(12, 13)], GLASS_SHINE)
+	else:
+		var cross: Array[Vector2i] = []
+		for i in 5:
+			cross.append(Vector2i(10 + i, 5 + i))
+			cross.append(Vector2i(14 - i, 5 + i))
+		_stroke(image, cross, WARNING)
 	return image

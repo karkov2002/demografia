@@ -87,8 +87,10 @@ nourrit 1/6 d'une ville** : il en faut 6 pour une ville de 1024 (voir §4). Les 
 
 - **Downgrade to village.** Dans le zoom d'une ville en paix, un gros bouton « Downgrade to village »
   (sous Boost) la fait redevenir village, après confirmation (le jeu continue pendant la question). Ses
-  scientists redeviennent workers, puis les habitants au-delà de 256 disparaissent : des workers
-  d'abord, puis la garnison, puis les colons. L'armée, qui a sa propre place, reste entière. Sur un village, la place du bouton reste vide pour que
+  scientists redeviennent workers, puis les habitants sont ramenés à 256 **en proportion** : workers,
+  garnison et colons gardent leurs parts (une ville de 600 workers et 200 fighters donne un village
+  d'environ 190 workers et 63 fighters). Le village peut ainsi nourrir sa garnison comme la ville
+  le faisait, sans dépendre de ses voisines. L'armée, qui a sa propre place, reste entière. Sur un village, la place du bouton reste vide pour que
   les autres boutons ne bougent pas.
 - **Famine.** Une ville affamée dont les habitants retombent à **256 ou moins** sous l'effet de la
   famine redevient automatiquement un village (ses scientists restants redeviennent workers). Ses
@@ -166,6 +168,10 @@ ennemies, dont la population totale est de toute façon affichée. Le maximum 0,
   si c'est la famine.
 - **Flèche « up ».** Sur chaque village plein du joueur qui peut passer en ville, une petite flèche
   dorée sautille et luit en haut à droite de la case.
+
+**Sélection.** Un clic gauche sur une case la sélectionne et l'affiche dans le zoom (ou, sur une case
+cible, y envoie les colons et l'armée de la case sélectionnée). Un **clic droit** sur la carte
+désélectionne la case : le zoom revient à « Cliquez sur une case ».
 - **Flash de conquête.** Toute case en vue qui change de main par la guerre s'illumine d'un éclair
   blanc, avec une onde à la couleur de son nouveau propriétaire (rouge si elle devient libre).
 - **Onde sur la frontière.** Quand le territoire du joueur s'agrandit, par colonisation ou conquête,
@@ -175,10 +181,25 @@ ennemies, dont la population totale est de toute façon affichée. Le maximum 0,
 - **Boost.** Chaque clic réussi fait s'envoler un « +1 » de la case et du bouton Boost.
 - **Découverte.** Une case qui vient d'être découverte sort du brouillard en fondu, en 0,8 s
   (`REVEAL_TIME`), avec un léger éclat.
+- **Sacs de grain.** Chaque flux de food entre deux cases du joueur (§4) est montré par un sac de
+  grain qui glisse en boucle, avec un petit cahot, de la case qui exporte vers celle qui reçoit, en
+  1,6 s (`FOOD_FLOW_PERIOD`), avec un fondu aux deux bouts. Le sac est plus gros quand le flux est fort
+  (de 0,32 à 0,48 rayon de case, plein à 512 par cycle). Chaque flux a son propre décalage, pour que
+  les sacs ne partent pas ensemble. Seuls les flux du joueur sont montrés : rien n'est révélé de
+  l'économie ennemie.
+- **Champs.** Chaque village en vue est entouré de parcelles de blé doré et de jeunes pousses, en pixel
+  art, sous ses huttes. Il y en a de plus en plus à mesure qu'il grandit : une parcelle par sixième de
+  sa capacité atteint, de 1 (village naissant) à 6 (village plein de 256)
+  (`assets/settlements/antiquity_fields_1.png` à `_6.png`, générées par `tools/generate_settlements.gd`).
+  Les villes n'en ont pas : on voit d'un coup d'œil les zones agricoles autour des villes.
+- **Armée prête.** Un petit soldat qui marche sur place, sur un disque clair, en haut à gauche d'une
+  case du joueur, signale qu'une armée y attend, prête à partir. Les armées ennemies restent cachées
+  (on n'en voit que la population totale de la case).
 
 Ces effets sont purement visuels. Ils suivent les signaux `World.owner_changed`, émis quand une case
-change de propriétaire, et `World.city_founded`, émis quand un village passe en ville, et `World.city_lost`, émis quand une ville
-redevient village.
+change de propriétaire, `World.city_founded`, émis quand un village passe en ville, et
+`World.city_lost`, émis quand une ville redevient village. Sacs de grain et champs suivent les
+échanges de food à chaque image.
 
 **Sons** (`scripts/view/sound_fx.gd`, sons CC0 de Kenney et OpenGameArt, crédits dans
 `assets/sounds/CREDITS.md`). Chaque bruitage mêle plusieurs sons, avec des instants, volumes et
@@ -205,6 +226,17 @@ morceaux s'enchaînent en boucle, en commençant par l'un des deux au hasard :
 
 Chaque morceau démarre par un fondu de 3 s. Le volume est bas (−20 dB, `VOLUME_DB`) pour rester sous
 les bruitages.
+
+**Bouton son.** Un petit haut-parleur en bas à droite de l'écran coupe tous les sons d'un clic
+(bruitages et musique) : il est alors barré d'une croix rouge. Un autre clic remet le son. C'est le bus
+audio principal qui est rendu muet, donc le réglage tient au retour au menu et dans les parties
+suivantes. Tant que le bouton « Choisir la case de départ » est affiché, le haut-parleur se place
+juste au-dessus.
+
+**Menu.** Un bouton « Menu », au bout de la barre des ressources en haut du panneau de droite, propose
+pour l'instant un seul choix, « Quitter ». Il demande « Do you really want to quit ? » (Yes / No) et le
+jeu est en pause pendant la question ; Yes ramène au menu principal. La touche Échap fait la même
+chose. En fin de partie, Quitter et Échap ramènent directement au menu.
 
 **Frontières.** Le territoire de chaque joueur en vue est entouré d'une frontière à sa couleur, au
 néon : un trait avec un cœur plus clair et un léger halo lumineux qui pulse. Il n'y a pas de frontière

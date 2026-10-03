@@ -1,6 +1,7 @@
 class_name ConfirmPopup
 extends ModalPopup
-## Question à deux réponses : annuler (bouton de gauche, ou Échap) ou confirmer (bouton de droite).
+## Question à deux réponses : annuler (bouton de gauche, ou Échap) ou confirmer (bouton de droite). Le
+## message sous le titre est facultatif (vide : pas de message).
 
 signal confirmed
 signal cancelled
@@ -9,7 +10,8 @@ signal cancelled
 func setup(title: String, message: String, cancel_text: String, confirm_text: String) -> void:
 	var content := _build_frame()
 	content.add_child(_label(title, 24, INK))
-	content.add_child(_label(message, 15, MUTED_INK))
+	if message != "":
+		content.add_child(_label(message, 15, MUTED_INK))
 	var buttons := HBoxContainer.new()
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	buttons.add_theme_constant_override("separation", 16)

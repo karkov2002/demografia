@@ -295,19 +295,22 @@ func downgrade_city(player_id: int, cell: Vector2i) -> bool:
 
 
 ## La ville `cell` redevient un village : ses scientists redeviennent workers (un village n'en accueille
-## pas), puis les habitants qui dépassent la capacité d'un village disparaissent : des workers d'abord,
-## puis la garnison, puis les colons. La troupe, qui a sa propre place, reste entière.
+## pas), puis, s'ils dépassent la capacité d'un village, ses habitants sont réduits à cette capacité en
+## proportion (workers, garnison et colons gardent leurs parts) : le village garde de quoi nourrir sa
+## garnison comme la ville le faisait. La troupe, qui a sa propre place, reste entière.
 func _make_village(cell: Vector2i) -> void:
 	_cities.erase(cell)
 	var cell_population := population(cell)
 	cell_population.counts["worker"] += cell_population.counts["scientist"]
 	cell_population.counts["scientist"] = 0.0
-	var excess := cell_population.residents() - capacity(cell)
-	for role in ["worker", "fighter"]:
-		var lost := clampf(excess, 0.0, cell_population.counts[role])
-		cell_population.counts[role] -= lost
-		excess -= lost
-	cell_population.settlers -= clampi(ceili(excess - 1e-6), 0, cell_population.settlers)
+	var residents := cell_population.residents()
+	if residents <= capacity(cell) + 1e-6:
+		return
+	var kept := capacity(cell) / residents
+	cell_population.settlers = floori(cell_population.settlers * kept)
+	cell_population.counts["fighter"] *= kept
+	# Les workers prennent le reste de la place, ce qui absorbe l'arrondi des colons.
+	cell_population.counts["worker"] = capacity(cell) - cell_population.settlers - cell_population.counts["fighter"]
 
 
 # --- Économie ------------------------------------------------------------------------------------

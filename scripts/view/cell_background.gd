@@ -2,7 +2,8 @@ class_name CellBackground
 extends RefCounted
 ## Fond d'une case vue par un joueur : brouillard si elle est inexplorée, sinon la tuile de son
 ## terrain, recouverte d'un voile à la couleur de son propriétaire si elle est occupée et en vue,
-## d'autant plus opaque qu'elle est remplie, et de son agglomération (village, ville ou mégapole).
+## d'autant plus opaque qu'elle est remplie, et de son agglomération (village, ville ou mégapole), entourée
+## de champs pour un village.
 
 ## Tuile en pixel art de chaque terrain (générées par res://tools/generate_tiles.gd).
 const TILES := {
@@ -31,6 +32,16 @@ const SETTLEMENTS := {
 				preload("res://assets/settlements/antiquity_megapolis_roof.png")],
 	],
 }
+## Champs posés autour de chaque village, sous ses huttes, de plus en plus nombreux à mesure qu'il grandit :
+## FIELDS[i] montre i + 1 parcelles (générés par res://tools/generate_settlements.gd, au format des tuiles).
+const FIELDS: Array[Texture2D] = [
+	preload("res://assets/settlements/antiquity_fields_1.png"),
+	preload("res://assets/settlements/antiquity_fields_2.png"),
+	preload("res://assets/settlements/antiquity_fields_3.png"),
+	preload("res://assets/settlements/antiquity_fields_4.png"),
+	preload("res://assets/settlements/antiquity_fields_5.png"),
+	preload("res://assets/settlements/antiquity_fields_6.png"),
+]
 ## Opacité de la couleur du propriétaire posée sur les toits : le reste laisse voir leur matière.
 const ROOF_TINT := 0.8
 
@@ -54,6 +65,11 @@ static func draw(canvas: CanvasItem, world: World, viewer_id: int, cell: Vector2
 		# Même cadre que la tuile : les pixels des bâtiments ont la taille de ceux du terrain.
 		var tile_size := Vector2(sqrt(3.0) * radius, 2.0 * radius)
 		var rect := Rect2(center - tile_size / 2.0, tile_size)
+		# Village : ses champs, dans leurs couleurs naturelles, sous les huttes ; une parcelle de plus à
+		# chaque sixième de sa capacité atteint.
+		if not world.is_city(cell):
+			var stage := ceili(FIELDS.size() * world.population(cell).residents() / world.capacity(cell) - 1e-6)
+			canvas.draw_texture_rect(FIELDS[clampi(stage, 1, FIELDS.size()) - 1], rect, false)
 		var sprites: Array = SETTLEMENTS["antiquity"][Icons.settlement_tier(world, cell)]
 		canvas.draw_texture_rect(sprites[0], rect, false)
 		canvas.draw_texture_rect(sprites[1], rect, false, Color(color, ROOF_TINT))
