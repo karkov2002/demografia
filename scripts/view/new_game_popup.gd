@@ -18,6 +18,8 @@ const AI_ITEMS := {
 	AIProfile.Level.AGGRESSIVE: "AI_TYPE_AGGRESSIVE",
 }
 const HUMAN_ITEM := 100
+## Niveau d'IA tiré au hasard au lancement de la partie (son dirigeant l'est alors aussi).
+const RANDOM_ITEM := 101
 ## Dimensions fixes de la fenêtre : largeur du contenu, hauteur d'une ligne de joueur (la liste garde
 ## toujours la place de GameSetup.MAX_PLAYERS lignes, pour que la fenêtre ne change pas de taille), largeur
 ## des listes de type et de dirigeant, taille des portraits dans la liste des dirigeants.
@@ -140,6 +142,7 @@ func _rebuild_players() -> void:
 		var type := OptionButton.new()
 		for level in AI_ITEMS:
 			type.add_item(Locale.text(AI_ITEMS[level]), level)
+		type.add_item(Locale.text("AI_TYPE_RANDOM"), RANDOM_ITEM)
 		type.add_item(Locale.text("NEW_GAME_HUMAN"), HUMAN_ITEM)
 		type.custom_minimum_size = Vector2(TYPE_WIDTH, 0.0)
 		type.clip_text = true
@@ -176,12 +179,17 @@ func _rebuild_players() -> void:
 
 
 ## Remplit le choix de dirigeant `option` pour une IA de niveau `level` : « Random », puis chaque dirigeant
-## de ce niveau avec son portrait ; `selected` (identifiant de dirigeant) est choisi s'il y figure.
+## de ce niveau avec son portrait ; `selected` (identifiant de dirigeant) est choisi s'il y figure. Pour un niveau
+## tiré au hasard (RANDOM_ITEM), seul « Random » est proposé : le dirigeant ne peut pas être choisi.
 func _fill_leaders(option: OptionButton, level: int, selected: String) -> void:
 	option.clear()
+	option.disabled = level == RANDOM_ITEM
 	option.add_icon_item(Leaders.unknown_portrait(), Locale.text("NEW_GAME_RANDOM_LEADER"))
 	option.set_item_metadata(0, "")
 	option.get_popup().set_item_icon_max_width(0, PORTRAIT_SIZE)
+	if level == RANDOM_ITEM:
+		option.select(0)
+		return
 	for id in Leaders.BY_LEVEL[level]:
 		option.add_icon_item(Leaders.portrait(id), Leaders.display_name(id))
 		var item := option.item_count - 1
@@ -223,7 +231,12 @@ func _on_start_pressed() -> void:
 	for index in _types.size():
 		var id := _types[index].get_selected_id()
 		setup.ai_players.append(id != HUMAN_ITEM)
-		setup.ai_levels.append(AIProfile.Level.NORMAL if id == HUMAN_ITEM else id)
+		var level: int = id
+		if id == HUMAN_ITEM:
+			level = AIProfile.Level.NORMAL
+		elif id == RANDOM_ITEM:
+			level = GameSetup.RANDOM_LEVEL
+		setup.ai_levels.append(level)
 		setup.ai_leaders.append(_selected_leader(index) if id != HUMAN_ITEM else "")
 	start_requested.emit(setup)
 

@@ -26,6 +26,7 @@ NEW_GAME_START = Start game
 AI_TYPE_PACIFIST = Pacifist AI
 AI_TYPE_NORMAL = Normal AI
 AI_TYPE_AGGRESSIVE = Aggressive AI
+AI_TYPE_RANDOM = Random AI
 
 # --- Types de carte -------------------------------------------------------------------------------
 MAP_ISLANDS = Islands

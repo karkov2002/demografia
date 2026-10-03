@@ -1,4 +1,4 @@
-# Règles du jeu et paramètres d'équilibrage
+# Civilografia — règles du jeu et paramètres d'équilibrage
 
 État des règles au 03/10/2026.
 
@@ -68,7 +68,7 @@ La famine et le surpeuplement tournent sur leur propre horloge, toutes les 0,1 s
 | `megapolis_threshold` | **2/3** | `GameRules` | Remplissage (habitants ÷ capacité du terrain) à partir duquel une ville est une mégapole. |
 | `megapolis_defense` | **×1,5** | `GameRules` | Remparts : multiplie la force de la garnison d'une mégapole. |
 | `starting_population` | **2 workers**, 0 scientist, 0 garnison | `GameRules` | Population posée sur la case de départ. |
-| Joueurs | **2 à 4** | fenêtre « New game » | Le joueur 1 est l'humain, les autres des IA pacifistes, normales ou agressives (normale par défaut). |
+| Joueurs | **2 à 4** | fenêtre « New game » | Le joueur 1 est l'humain, les autres des IA pacifistes, normales, agressives ou de niveau tiré au hasard (normale par défaut). |
 
 **Règle d'or.** Les habitants d'une case ne dépassent jamais sa capacité. Ils comprennent tous les
 rôles et les colons en attente, mais **pas l'armée** (depuis le 03/10) : elle a sa propre place, en plus,
@@ -354,7 +354,9 @@ hasard selon son niveau, sans doublon dans une partie (`scripts/model/leaders.gd
 
 **Choisir ses adversaires.** Dans la fenêtre « New game », chaque IA a, à côté de son niveau, une liste de
 dirigeants : « Random » (silhouette « ? ») ou l'un des dirigeants de son niveau, avec son portrait.
-Changer le niveau remet la liste à « Random ». Un dirigeant déjà choisi pour une autre IA est grisé. Les
+Changer le niveau remet la liste à « Random ». Le niveau peut aussi être **« Random AI »** : il est alors
+tiré au hasard au lancement (pacifiste, normale ou agressive), et le dirigeant aussi ; la liste des
+dirigeants est grisée sur « Random ». Un dirigeant déjà choisi pour une autre IA est grisé. Les
 IA laissées sur « Random » tirent leur dirigeant parmi ceux que personne n'a choisis. La fenêtre garde une
 taille fixe, quel que soit le nombre de joueurs (la place de 4 lignes est toujours réservée).
 

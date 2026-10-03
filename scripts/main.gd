@@ -55,6 +55,9 @@ func _ready() -> void:
 	for index in setup.ai_players.size():
 		var is_ai := setup.ai_players[index]
 		var level: int = setup.ai_levels[index] if index < setup.ai_levels.size() else AIProfile.Level.NORMAL
+		# Niveau « Random » : tiré au hasard, ainsi que le dirigeant.
+		if level == GameSetup.RANDOM_LEVEL:
+			level = rng.randi_range(AIProfile.Level.PACIFIST, AIProfile.Level.AGGRESSIVE)
 		var profile := AIProfile.of_level(level) if is_ai else null
 		# Le handicap de croissance d'une IA dépend de son niveau.
 		var player := _world.add_player(is_ai, profile.growth_factor if is_ai else 1.0)

@@ -8,6 +8,8 @@ const MIN_SIZE := 4
 const MAX_SIZE := 20
 const MIN_PLAYERS := 2
 const MAX_PLAYERS := 4
+## Niveau d'IA tiré au hasard au lancement de la partie.
+const RANDOM_LEVEL := -1
 
 ## Paramètres de la prochaine partie ; null tant qu'aucun n'a été choisi (la scène de jeu lancée
 ## directement prend alors les valeurs par défaut).
@@ -20,7 +22,8 @@ var map_type: int = MapGenerator.MapType.CONTINENTS
 ## Pour chaque joueur, dans l'ordre (qui fixe aussi son identifiant et sa couleur) : IA ou humain.
 ## Le premier est le joueur local, humain.
 var ai_players: Array[bool] = [false, true]
-## Pour chaque joueur, dans le même ordre : niveau de l'IA (AIProfile.Level), ignoré pour un humain.
+## Pour chaque joueur, dans le même ordre : niveau de l'IA (AIProfile.Level, ou RANDOM_LEVEL pour un niveau
+## tiré au hasard au lancement), ignoré pour un humain.
 var ai_levels: Array[int] = [AIProfile.Level.NORMAL, AIProfile.Level.NORMAL]
 ## Pour chaque joueur, dans le même ordre : dirigeant choisi pour une IA (voir Leaders), "" pour un dirigeant
 ## tiré au hasard (ou un humain).
