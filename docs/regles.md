@@ -129,14 +129,19 @@ plaine nourrit 1/4 d'une ville** : il en faut 4 pour une ville de 1024 (6 en for
 |---|---|---|---|---|---|
 | Plaine | 1024 | **4** | 2 | ×1 | herbe et fleurs |
 | Forêt | 768 | 3 | 2 | ×1 | frondaisons rondes |
-| Colline | 768 | 2,5 | 2 | **×1,5** | croupes herbeuses |
+| Colline | 768 | 2,5 | 2 | **×1,5** | collines verdoyantes boisées (peinte à la main) |
 | Marais | 512 | 2 | 2 | ×1 | mares, roseaux et massettes |
-| Montagne | 256 | 3 | **3** | **×2** | pics enneigés |
+| Montagne | 256 | 3 | **3** | **×2** | massif enneigé et sapins (peinte à la main) |
 | Eau | 0 (inhabitable) | — | — | — | vagues |
 
 La food est `food_per_worker`, l'or de montagne `mountain_gold_per_worker`, la défense
 `terrain_defense` (tous dans `GameRules`). En ville, un worker ne produit pas de food et rapporte 3
-d'or quel que soit le terrain. Les tuiles sont générées par `tools/generate_tiles.gd`.
+d'or quel que soit le terrain. Toutes les images au format tuile (terrains, agglomérations, champs) font **84×96**
+(`TILE_SIZE`, `OUTPUT_SIZE`). Celles que le code dessine encore le sont à 42×48, puis agrandies sans
+lissage (même rendu à l'écran) : elles seront remplacées peu à peu par des images peintes à la main. La
+montagne et la colline le sont déjà : leurs originaux sont dans `assets/tiles/sources/` (dossier ignoré
+par Godot) et `tools/generate_tiles.gd` les réduit à 84×96. Les petites icônes (16×16) gardent leur
+format.
 
 **Types de carte** (`MapGenerator`, choisi dans la fenêtre « New game ») :
 - **Îles** : de l'eau partout, et **deux fois plus d'îles que de joueurs**, compactes et séparées par
@@ -191,7 +196,7 @@ dessous. Le type d'agglomération dépend du statut de la case et, pour une vill
 | ville, au-delà | **mégapole** : cité ceinte d'un rempart, avec grand temple, tour de guet et maisons serrées | ≥ 683 | ≥ 171 |
 
 - **Intégration au décor.** Les agglomérations sont en pixel art vu de trois quarts, au format des
-  tuiles (42×48), donc à la même échelle de pixels que le terrain. La lumière vient d'en haut à gauche
+  tuiles (dessinées à 42×48, enregistrées en 84×96), donc à la même échelle de pixels que le terrain. La lumière vient d'en haut à gauche
   et les ombres sont portées sur le sol. Les couleurs sont naturelles (pierre, torchis, chaume,
   terre cuite), sans contour noir.
 - **Couleur du joueur.** Seuls les toits et les bannières prennent la couleur du propriétaire, posée

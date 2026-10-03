@@ -1,6 +1,7 @@
 extends SceneTree
 ## Génère les agglomérations (village, ville, mégapole) de chaque époque, en pixel art vu de trois quarts,
-## dans res://assets/settlements/. Même format que les tuiles de terrain (42×48, voir generate_tiles.gd),
+## dans res://assets/settlements/. Dessinées à 42×48 et enregistrées au format des tuiles de terrain
+## (84×96, voir OUTPUT_SIZE et generate_tiles.gd),
 ## pour être posées sur la tuile à la même échelle de pixels : lumière venant d'en haut à gauche, ombres
 ## portées vers le bas à droite, palettes naturelles et douces, sans contour noir.
 ## Chaque agglomération a deux calques :
@@ -15,6 +16,10 @@ extends SceneTree
 const WIDTH := 42
 const HEIGHT := 48
 const OUT_DIR := "res://assets/settlements/"
+## Taille des images enregistrées, celle des tuiles (voir generate_tiles.gd) : dessinées à WIDTH × HEIGHT,
+## puis agrandies sans lissage (chaque pixel doublé, même rendu à l'écran). Elles pourront être remplacées
+## par des images peintes à la main de cette taille.
+const OUTPUT_SIZE := Vector2i(84, 96)
 
 ## Nuances du plus sombre au plus clair.
 const STONE := ["6e6453", "8a7f69", "a89c82", "c4b89c", "ddd2b6", "efe6cf"]
@@ -50,7 +55,7 @@ func _init() -> void:
 	_save_layers(_antiquity_megapolis(), "antiquity_megapolis")
 	for stage in range(1, FIELD_PARCELS.size() + 1):
 		var path := OUT_DIR + "antiquity_fields_%d.png" % stage
-		_antiquity_fields(stage).save_png(ProjectSettings.globalize_path(path))
+		_save(_antiquity_fields(stage), path)
 		print("Champs générés : ", path)
 	quit()
 
@@ -61,10 +66,16 @@ func _layers() -> Array[Image]:
 			Image.create_empty(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)]
 
 
+## Enregistre `image` en `path`, agrandie sans lissage au format OUTPUT_SIZE.
+func _save(image: Image, path: String) -> void:
+	image.resize(OUTPUT_SIZE.x, OUTPUT_SIZE.y, Image.INTERPOLATE_NEAREST)
+	image.save_png(ProjectSettings.globalize_path(path))
+
+
 func _save_layers(layers: Array[Image], name: String) -> void:
 	for i in 2:
 		var path := OUT_DIR + name + ("_base" if i == 0 else "_roof") + ".png"
-		layers[i].save_png(ProjectSettings.globalize_path(path))
+		_save(layers[i], path)
 		print("Agglomération générée : ", path)
 
 

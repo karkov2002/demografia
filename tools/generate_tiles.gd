@@ -1,5 +1,6 @@
 extends SceneTree
-## Génère les tuiles de terrain en pixel art (hexagones pointe en haut, 42×48) dans res://assets/tiles/.
+## Génère les tuiles de terrain en pixel art (hexagones pointe en haut) dans res://assets/tiles/, au format
+## TILE_SIZE (84×96) ; la montagne et la colline viennent d'images peintes à la main (voir SOURCE_DIR).
 ## Style doux : palettes en dégradé peu saturées, bruit lissé plutôt que pixels isolés, lumière venant
 ## d'en haut à gauche, tramage ordonné pour adoucir le passage d'une nuance à l'autre.
 ## À relancer après modification :
@@ -9,13 +10,16 @@ const RADIUS := 24
 const WIDTH := 42
 const HEIGHT := 48
 const OUT_DIR := "res://assets/tiles/"
+## Taille de toutes les tuiles enregistrées. Les tuiles dessinées par ce script le sont à WIDTH × HEIGHT,
+## puis agrandies sans lissage (chaque pixel doublé, même rendu à l'écran) ; les tuiles peintes à la main
+## (images d'origine dans SOURCE_DIR, dossier ignoré par Godot pour ne pas importer ces grandes images)
+## y sont réduites. Elles remplaceront peu à peu les tuiles dessinées.
+const SOURCE_DIR := "res://assets/tiles/sources/"
+const TILE_SIZE := Vector2i(84, 96)
 
 ## Nuances du plus sombre au plus clair.
 const PRAIRIE_RAMP := ["2f5d3a", "3b7043", "4a8248", "5c9450", "72a65a", "8bb866", "a7c97a"]
 const FLOWERS := ["f2d479", "e8a0a8", "f4efd8"]
-const GROUND_RAMP := ["44533a", "4f6140", "5b6e47", "687b50", "788a5c"]
-const ROCK_RAMP := ["464b62", "565d78", "6a7290", "8088a3", "9aa1b8", "b4bacb"]
-const SNOW_RAMP := ["c3cedb", "dfe6ef", "f4f7fa"]
 const WATER_RAMP := ["1e4f7a", "25628f", "2e76a3", "3a8bb5", "4f9fc4", "6db4d2", "93cadf"]
 const FOG_RAMP := ["2b2f3a", "343947", "3e4454", "4a5163", "575f73"]
 const FOAM := "e3f1f5"
@@ -23,8 +27,6 @@ const FOAM := "e3f1f5"
 const UNDERGROWTH_RAMP := ["24452c", "2c5233", "355f3b", "406c43"]
 const CANOPY_RAMP := ["1f4a2a", "2a5e33", "387340", "4c8a4c", "68a35a", "86b96b"]
 const TRUNK := "4a3424"
-## Colline : herbe des pentes (plus sèche que la plaine), crêtes claires.
-const HILL_RAMP := ["3f5e34", "4c6f3b", "5b8044", "6d914e", "82a35c", "9bb56d", "b5c784"]
 ## Marais : sol vaseux, mares sombres, roseaux et massettes.
 const MARSH_RAMP := ["3a4430", "445036", "4f5c3c", "5b6943", "68774b"]
 const POOL_RAMP := ["26403f", "2e4f4b", "3a5f58", "4f766b", "6f9585"]
@@ -38,16 +40,19 @@ const BAYER := [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
 func _init() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT_DIR))
 	_save(_prairie(), "prairie")
-	_save(_mountain(), "mountain")
+	_save(_from_source("mountain"), "mountain")
 	_save(_water(), "water")
 	_save(_forest(), "forest")
-	_save(_hill(), "hill")
+	_save(_from_source("hill"), "hill")
 	_save(_marsh(), "marsh")
 	_save(_fog(), "fog")
 	quit()
 
 
+## Enregistre `image` au format des tuiles (TILE_SIZE), agrandie sans lissage si besoin.
 func _save(image: Image, name: String) -> void:
+	if image.get_size() != TILE_SIZE:
+		image.resize(TILE_SIZE.x, TILE_SIZE.y, Image.INTERPOLATE_NEAREST)
 	var path := OUT_DIR + name + ".png"
 	image.save_png(ProjectSettings.globalize_path(path))
 	print("Tuile générée : ", path)
@@ -151,38 +156,6 @@ func _prairie() -> Image:
 	return image
 
 
-func _mountain() -> Image:
-	var image := _textured(2, GROUND_RAMP, 0.3)
-	var noise := SmoothNoise.new(22)
-	_peak(image, noise, 29, 15, 37, 10, 6)
-	_peak(image, noise, 18, 6, 39, 16, 11)
-	return image
-
-
-## Pic rocheux : face gauche éclairée, face droite dans l'ombre, dégradé selon la distance à l'arête,
-## calotte de neige au bord irrégulier sur les `snow_depth` premières rangées.
-func _peak(image: Image, noise: SmoothNoise, apex_x: int, apex_y: int, base_y: int, half_width: int,
-		snow_depth: int) -> void:
-	for y in range(apex_y, base_y + 1):
-		var half := roundi(float(y - apex_y) / (base_y - apex_y) * half_width)
-		for x in range(apex_x - half, apex_x + half + 1):
-			# 0 sur l'arête, 1 sur le bord du pic.
-			var from_ridge := absf(x - apex_x) / maxf(1.0, half)
-			var texture := (noise.sample(x, y) - 0.5) * 0.35
-			var value: float
-			if x <= apex_x:
-				value = 0.95 - from_ridge * 0.35 + texture
-			else:
-				value = 0.4 - from_ridge * 0.3 + texture
-			var snow_line := snow_depth + roundi((noise.sample(x * 2.0, 3.0) - 0.5) * 4.0)
-			if y - apex_y < snow_line:
-				_plot(image, x, y, _shade(SNOW_RAMP, value, x, y))
-			elif x == apex_x - half or x == apex_x + half or y == base_y:
-				_plot(image, x, y, ROCK_RAMP[0])
-			else:
-				_plot(image, x, y, _shade(ROCK_RAMP, value, x, y))
-
-
 func _water() -> Image:
 	var image := _textured(3, WATER_RAMP, 0.45)
 	var rng := RandomNumberGenerator.new()
@@ -196,6 +169,15 @@ func _water() -> Image:
 			_plot(image, spot.x + dx, spot.y - lift + 1, WATER_RAMP[2])
 		if i % 3 == 0:
 			_plot(image, spot.x, spot.y - 1, FOAM)
+	return image
+
+
+## Tuile peinte à la main `name` : l'image d'origine de SOURCE_DIR, réduite à TILE_SIZE (filtre de
+## Lanczos, qui garde le détail sans crénelage).
+func _from_source(name: String) -> Image:
+	var image := Image.load_from_file(ProjectSettings.globalize_path(SOURCE_DIR + name + ".png"))
+	image.convert(Image.FORMAT_RGBA8)
+	image.resize(TILE_SIZE.x, TILE_SIZE.y, Image.INTERPOLATE_LANCZOS)
 	return image
 
 
@@ -229,40 +211,6 @@ func _forest() -> Image:
 				if offset.length() > radius - 1.0 and offset.x + offset.y > 0.0:
 					value -= 0.25
 				_plot(image, x, y, _shade(CANOPY_RAMP, value, x, y))
-	return image
-
-
-## Colline : herbe sèche ondulée, avec trois croupes arrondies éclairées sur leur versant gauche, une
-## crête claire et un pied dans l'ombre, et quelques cailloux.
-func _hill() -> Image:
-	var image := _textured(6, HILL_RAMP, 0.3)
-	var noise := SmoothNoise.new(66)
-	for mound in [[Vector2(13.0, 21.0), 11.0, 8.0], [Vector2(30.0, 18.0), 10.0, 7.0], [Vector2(22.0, 35.0), 14.0, 9.0]]:
-		var center: Vector2 = mound[0]
-		var half: float = mound[1]
-		var height: float = mound[2]
-		for y in range(int(center.y - height) - 1, int(center.y) + 2):
-			for x in range(int(center.x - half), int(center.x + half) + 1):
-				var u := (x + 0.5 - center.x) / half
-				if absf(u) > 1.0:
-					continue
-				# Profil en cloche : la croupe monte jusqu'à `height` pixels au-dessus de son pied.
-				var top := center.y - height * (1.0 - u * u)
-				if y + 0.5 < top or y > center.y:
-					continue
-				var value := 0.7 - u * 0.75 + (noise.sample(x, y) - 0.5) * 0.15
-				if y + 0.5 - top < 1.2:
-					value += 0.3
-				if y >= int(center.y):
-					value = 0.0
-				_plot(image, x, y, _shade(HILL_RAMP, value, x, y))
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 67
-	for i in 5:
-		var spot := _random_spot(rng, 3)
-		_plot(image, spot.x, spot.y, ROCK_RAMP[4])
-		_plot(image, spot.x + 1, spot.y, ROCK_RAMP[2])
-		_plot(image, spot.x + 1, spot.y + 1, HILL_RAMP[0])
 	return image
 
 
