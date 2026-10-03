@@ -75,6 +75,32 @@ func is_visible(player_id: int, cell: Vector2i) -> bool:
 	return false
 
 
+## Contacts : chaque joueur rencontre ceux dont il voit au moins une case ; il les connaît ensuite pour
+## toujours (même s'il les perd de vue).
+func update_contacts() -> void:
+	for cell in _populations:
+		var cell_owner := owner(cell)
+		for current in players:
+			if current.id != cell_owner and not current.has_met(cell_owner) and is_visible(current.id, cell):
+				current.meet(cell_owner)
+
+
+## Cases habitables de la carte (hors eau) : la surface de référence des territoires.
+func habitable_cells() -> int:
+	var count := 0
+	for row in rows:
+		for column in columns:
+			if capacity(Vector2i(column, row)) > 0.0:
+				count += 1
+	return count
+
+
+## Part (0 à 1) des cases habitables de la carte qui appartiennent au joueur.
+func territory_share(player_id: int) -> float:
+	var total := habitable_cells()
+	return float(cells_of(player_id).size()) / total if total > 0 else 0.0
+
+
 ## Le joueur découvre `cell` et ses voisines.
 func _reveal_around(player_id: int, cell: Vector2i) -> void:
 	player(player_id).explore(cell)
@@ -554,6 +580,7 @@ func tick() -> void:
 		for cell in cells_of(current.id):
 			if not is_at_war(cell):
 				_populations[cell].grow(cell_growth_rates(cell), terrain_capacity(cell), _growth_limit(cell))
+	update_contacts()
 	changed.emit()
 
 
@@ -579,6 +606,7 @@ func start_at(player_id: int, cell: Vector2i) -> bool:
 	_populations[cell] = Population.new(player_id, rules.starting_population)
 	player(player_id).started = true
 	_reveal_around(player_id, cell)
+	update_contacts()
 	changed.emit()
 	return true
 
@@ -587,7 +615,8 @@ func start_at(player_id: int, cell: Vector2i) -> bool:
 ## colons ne dépassent jamais rules.max_settlers) ; renvoie le nombre réellement déplacé. La troupe se
 ## forme en priorité avec les fighters de la case : des workers ne s'y enrôlent qu'une fois ceux-ci
 ## épuisés. Un village n'accueille pas de scientist. Les fighters qui quittent la troupe (garnison ou
-## workers) doivent trouver de la place parmi les habitants (voir free_room).
+## workers) doivent trouver de la place parmi les habitants (voir free_room). La troupe et les colons
+## laissent toujours au moins un habitant dans la case.
 func transfer(player_id: int, cell: Vector2i, from_role: String, to_role: String, amount: int = 1) -> int:
 	if not can_command(player_id, cell) or (to_role == "scientist" and not is_city(cell)):
 		return 0
@@ -596,6 +625,12 @@ func transfer(player_id: int, cell: Vector2i, from_role: String, to_role: String
 		amount = mini(amount, rules.max_army - cell_population.army)
 	if to_role == Population.SETTLER:
 		amount = mini(amount, rules.max_settlers - cell_population.settlers)
+	# Armée et colons ne vident jamais la case : il y reste toujours au moins un worker, scientist ou
+	# fighter de la garnison.
+	if to_role in [Population.ARMY, Population.SETTLER]:
+		var staying := cell_population.whole("worker") + cell_population.whole("scientist") \
+				+ cell_population.whole("fighter")
+		amount = mini(amount, staying - 1)
 	# Les fighters qui quittent la troupe redeviennent des habitants : il leur faut de la place.
 	if from_role == Population.ARMY and to_role != Population.ARMY:
 		amount = mini(amount, free_room(cell))
@@ -684,6 +719,7 @@ func move_convoys(seconds: float) -> void:
 			else:
 				source.settlers += back
 	if not arrived.is_empty():
+		update_contacts()
 		changed.emit()
 
 

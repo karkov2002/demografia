@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1_profile")
-label = "agressive"
+label = "AI_LEVEL_AGGRESSIVE"
 boost_clicks_per_second = 4.0
 boost_burst_seconds = 3.0
 boost_pause_seconds = 5.0

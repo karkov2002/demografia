@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1_profile")
-label = "pacifiste"
+label = "AI_LEVEL_PACIFIST"
 boost_clicks_per_second = 2.0
 boost_burst_seconds = 2.0
 boost_pause_seconds = 8.0

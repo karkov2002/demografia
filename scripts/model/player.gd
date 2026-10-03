@@ -14,6 +14,8 @@ var started: bool = false
 var gold: float = 0.0
 
 var _explored: Dictionary[Vector2i, bool] = {}
+## Joueurs rencontrés : ceux dont il a vu au moins une case (voir World.update_contacts).
+var _met: Dictionary[int, bool] = {}
 
 
 func _init(player_id: int, ai: bool, factor: float) -> void:
@@ -28,3 +30,12 @@ func explore(cell: Vector2i) -> void:
 
 func has_explored(cell: Vector2i) -> bool:
 	return _explored.has(cell)
+
+
+## Rencontre le joueur `player_id` : il le connaît désormais.
+func meet(player_id: int) -> void:
+	_met[player_id] = true
+
+
+func has_met(player_id: int) -> bool:
+	return player_id == id or _met.has(player_id)

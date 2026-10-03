@@ -26,11 +26,15 @@ var _population_at_cycle_start: int = 0
 var _history := GameHistory.new()
 var _elapsed: float = 0.0
 var _game_over: bool = false
+## Joueurs ennemis dont la destruction a déjà été annoncée.
+var _destroyed: Dictionary[int, bool] = {}
 ## Fenêtre « Do you really want to quit ? » ouverte par Échap ou Menu > Quitter, ou null.
 var _quit_confirmation: ConfirmPopup
 var _sounds := SoundFx.new()
 ## Bouton son (haut-parleur), en bas à droite de l'écran.
 var _sound_button: TextureButton
+## Liste des joueurs et de leur territoire, sous la barre des ressources.
+var _player_list := PlayerList.new()
 
 
 func _ready() -> void:
@@ -68,6 +72,7 @@ func _ready() -> void:
 	_map.world = _world
 	_preview.world = _world
 	_world.changed.connect(_update_stats)
+	_world.changed.connect(_check_destroyed)
 	_world.changed.connect(_check_game_over)
 	add_child(_sounds)
 	add_child(BackgroundMusic.new())
@@ -81,6 +86,7 @@ func _ready() -> void:
 	_preview.city_requested.connect(_on_city_requested)
 	_preview.downgrade_requested.connect(_on_downgrade_requested)
 	_preview.button_clicked.connect(_sounds.click)
+	_add_player_list()
 	_add_menu_button()
 	_add_sound_button()
 	# La partie commence aussitôt, la case de départ du joueur sélectionnée dans le zoom.
@@ -158,9 +164,9 @@ func _on_downgrade_requested() -> void:
 	var lost := maxi(0, floori(_world.population(cell).residents() + 1e-6) - village)
 	var popup := ConfirmPopup.new()
 	add_child(popup)
-	var message := "La ville perdra %s habitants pour revenir à %d,\net ses scientists redeviendront workers." \
-			% [NumberFormat.compact(lost), village]
-	popup.setup("Redevenir un village ?", message, "Annuler", "Downgrade")
+	var message := Locale.text("DOWNGRADE_MESSAGE", {"count": NumberFormat.compact(lost), "capacity": village})
+	popup.setup(Locale.text("DOWNGRADE_TITLE"), message, Locale.text("DOWNGRADE_CANCEL"),
+			Locale.text("DOWNGRADE_CONFIRM"))
 	popup.confirmed.connect(func() -> void:
 		_world.execute(DowngradeCityCommand.new(_human.id, cell))
 		popup.queue_free())
@@ -180,6 +186,8 @@ func _on_units_sent(to_cell: Vector2i) -> void:
 ## Totaux du joueur dans la barre d'action, chacun avec sa tendance : science produite par cycle,
 ## évolution de la population depuis le début du cycle, revenu en or et solde de food par cycle.
 func _update_stats() -> void:
+	if _player_list.is_inside_tree():
+		_player_list.refresh(_world, _human.id)
 	var population := _world.total_population(_human.id)
 	_science_stat.value = NumberFormat.compact(floori(_human.science))
 	_science_stat.trend = _world.science_rate(_human.id)
@@ -190,6 +198,19 @@ func _update_stats() -> void:
 	var food := _world.total_food_balance(_human.id)
 	_food_stat.value = NumberFormat.signed(food)
 	_food_stat.trend = food
+
+
+## Annonce chaque joueur ennemi qui vient d'être détruit (plus personne nulle part) : « Player #N has been
+## destroyed » en grand sur la carte, avec feux d'artifice et clameur de victoire.
+func _check_destroyed() -> void:
+	for current in _world.players:
+		if current == _human or _destroyed.has(current.id) or not current.started:
+			continue
+		if _world.total_population(current.id) == 0:
+			_destroyed[current.id] = true
+			_map.show_destroyed(Locale.text("PLAYER_DESTROYED", {"number": current.id + 1,
+					"color": Locale.text(CellBackground.PLAYER_COLOR_NAMES[current.id])}))
+			_sounds.victory()
 
 
 ## Fin de partie dès qu'au plus un joueur reste en lice, ou que le joueur local est éliminé : les
@@ -220,14 +241,15 @@ func _end_game(winner_id: int, human_alive: bool, abandoned: bool) -> void:
 	popup.menu_requested.connect(_go_to_menu)
 
 
-## « Vous » pour le joueur local, sinon « IA » suivi de sa couleur et de son niveau.
+## « You » pour le joueur local, sinon « AI » suivi de sa couleur et de son niveau (dans la langue du jeu).
 func _player_name(player: Player) -> String:
 	if player == _human:
-		return "Vous"
+		return Locale.text("PLAYER_YOU")
+	var color := Locale.text(CellBackground.PLAYER_COLOR_NAMES[player.id])
 	for ai in _ais:
 		if ai.player_id == player.id:
-			return "IA %s (%s)" % [CellBackground.PLAYER_COLOR_NAMES[player.id], ai.profile.label]
-	return "IA %s" % CellBackground.PLAYER_COLOR_NAMES[player.id]
+			return Locale.text("PLAYER_AI", {"color": color, "level": Locale.text(ai.profile.label)})
+	return Locale.text("PLAYER_AI_SHORT", {"color": color})
 
 
 ## Échap : comme Menu > Quitter (voir _ask_quit).
@@ -251,7 +273,7 @@ func _ask_quit() -> void:
 	_starvation_clock.running = false
 	_quit_confirmation = ConfirmPopup.new()
 	add_child(_quit_confirmation)
-	_quit_confirmation.setup("Do you really want to quit ?", "", "No", "Yes")
+	_quit_confirmation.setup(Locale.text("QUIT_CONFIRM"), "", Locale.text("COMMON_NO"), Locale.text("COMMON_YES"))
 	_quit_confirmation.confirmed.connect(func() -> void:
 		_quit_confirmation.queue_free()
 		_quit_confirmation = null
@@ -266,15 +288,32 @@ func _go_to_menu() -> void:
 	get_tree().change_scene_to_file(MENU_SCENE)
 
 
+## Liste des joueurs (voir PlayerList), juste sous la barre des ressources, avec une marge sur les côtés.
+func _add_player_list() -> void:
+	var names := {}
+	for current in _world.players:
+		names[current.id] = _player_name(current)
+	_player_list.setup(_world, names)
+	var margin := MarginContainer.new()
+	for side in ["left", "right"]:
+		margin.add_theme_constant_override("margin_" + side, 16)
+	margin.add_theme_constant_override("margin_top", 6)
+	margin.add_child(_player_list)
+	var info_box := $Layout/InfoPanel/InfoBox
+	info_box.add_child(margin)
+	info_box.move_child(margin, 1)
+	_player_list.refresh(_world, _human.id)
+
+
 ## Bouton « Menu » au bout de la barre d'action, en haut du panneau de droite : pour l'instant un seul
 ## choix, « Quitter », qui ramène au menu principal après confirmation (voir _ask_quit).
 func _add_menu_button() -> void:
 	const QUIT_ID := 0
 	var menu := MenuButton.new()
-	menu.text = "Menu"
+	menu.text = Locale.text("HUD_MENU")
 	menu.flat = false
 	menu.focus_mode = Control.FOCUS_NONE
-	menu.get_popup().add_item("Quitter", QUIT_ID)
+	menu.get_popup().add_item(Locale.text("HUD_QUIT"), QUIT_ID)
 	menu.get_popup().id_pressed.connect(func(id: int) -> void:
 		if id == QUIT_ID:
 			_ask_quit())
@@ -308,4 +347,4 @@ func _add_sound_button() -> void:
 func _update_sound_button() -> void:
 	var muted := AudioServer.is_bus_mute(AudioServer.get_bus_index("Master"))
 	_sound_button.texture_normal = Icons.SOUND_OFF if muted else Icons.SOUND_ON
-	_sound_button.tooltip_text = "Remettre le son" if muted else "Couper le son"
+	_sound_button.tooltip_text = Locale.text("HUD_UNMUTE" if muted else "HUD_MUTE")

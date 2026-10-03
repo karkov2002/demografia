@@ -1,6 +1,6 @@
 # Règles du jeu et paramètres d'équilibrage
 
-État des règles au 28/09/2026.
+État des règles au 03/10/2026.
 
 **Où sont les paramètres d'équilibrage.** Tous sont regroupés dans deux ressources, réglables dans
 l'inspecteur de Godot :
@@ -18,6 +18,18 @@ règles (`World`, `AIController`) ne contient pas d'autre nombre qui pèse sur l
 (voir §12).
 
 Les valeurs marquées *(calculé)* ne se règlent pas directement : elles découlent des autres.
+
+**Textes du jeu et traductions (depuis le 03/10).** Le jeu est en **anglais**. Tous les textes affichés
+sont rangés par clé dans `translations/translate.en`, une ligne `CLÉ = texte` (lignes `#` ignorées, `
+`
+pour passer à la ligne, marqueurs `{nom}` remplacés à l'affichage). Le code ne contient aucun texte
+affiché en dur : il demande `Locale.text("CLÉ", {"nom": valeur})` (`scripts/locale.gd`), qui charge le
+fichier dans le `TranslationServer` de Godot. Pour ajouter une langue, copier le fichier en
+`translate.<code>` (`translate.fr`…), traduire la partie droite, et appeler `Locale.load_language("fr")`
+(un choix de langue dans le menu reste à faire). Les noms de niveaux d'IA (`AIProfile.label`), de couleurs,
+de terrains et de types de carte sont eux aussi des clés. À l'export, il faudra inclure les fichiers
+`translations/*` (ce ne sont pas des ressources Godot). Cette documentation et les commentaires du code
+restent en français.
 
 ---
 
@@ -42,8 +54,8 @@ La famine et le surpeuplement tournent sur leur propre horloge, toutes les 0,1 s
 
 | Variable | Valeur | Où | Rôle |
 |---|---|---|---|
-| Type de carte | **Continents** par défaut | fenêtre « Nouvelle partie » | Îles, Continents, Lacs ou Méditerranée (voir « Types de carte »). |
-| `columns` × `rows` | **10 × 10** par défaut, jusqu'à 20 par côté | fenêtre « Nouvelle partie » | Taille de la carte ; le minimum dépend du type de carte et du nombre de joueurs. |
+| Type de carte | **Continents** par défaut | fenêtre « New game » | Îles, Continents, Lacs ou Méditerranée (voir « Types de carte »). |
+| `columns` × `rows` | **10 × 10** par défaut, jusqu'à 20 par côté | fenêtre « New game » | Taille de la carte ; le minimum dépend du type de carte et du nombre de joueurs. |
 | `mountain_count` | **6** | `GameRules` | Montagnes pour 100 cases de terre, multiplié au hasard par 0,8 à 1,8 (`mountain_spread`). |
 | `forest_count`, `hill_count`, `marsh_count` | **14**, **9**, **6** | `GameRules` | Forêts, collines et marais pour 100 cases de terre, posés en petits massifs. |
 | `water_count` | **15** | `GameRules` | Carte « Lacs » : cases d'eau pour 100 cases, en grandes étendues. |
@@ -56,7 +68,7 @@ La famine et le surpeuplement tournent sur leur propre horloge, toutes les 0,1 s
 | `megapolis_threshold` | **2/3** | `GameRules` | Remplissage (habitants ÷ capacité du terrain) à partir duquel une ville est une mégapole. |
 | `megapolis_defense` | **×1,5** | `GameRules` | Remparts : multiplie la force de la garnison d'une mégapole. |
 | `starting_population` | **2 workers**, 0 scientist, 0 garnison | `GameRules` | Population posée sur la case de départ. |
-| Joueurs | **2 à 4** | fenêtre « Nouvelle partie » | Le joueur 1 est l'humain, les autres des IA pacifistes, normales ou agressives (normale par défaut). |
+| Joueurs | **2 à 4** | fenêtre « New game » | Le joueur 1 est l'humain, les autres des IA pacifistes, normales ou agressives (normale par défaut). |
 
 **Règle d'or.** Les habitants d'une case ne dépassent jamais sa capacité. Ils comprennent tous les
 rôles et les colons en attente, mais **pas l'armée** (depuis le 03/10) : elle a sa propre place, en plus,
@@ -126,7 +138,7 @@ La food est `food_per_worker`, l'or de montagne `mountain_gold_per_worker`, la d
 `terrain_defense` (tous dans `GameRules`). En ville, un worker ne produit pas de food et rapporte 3
 d'or quel que soit le terrain. Les tuiles sont générées par `tools/generate_tiles.gd`.
 
-**Types de carte** (`MapGenerator`, choisi dans la fenêtre « Nouvelle partie ») :
+**Types de carte** (`MapGenerator`, choisi dans la fenêtre « New game ») :
 - **Îles** : de l'eau partout, et **deux fois plus d'îles que de joueurs**, compactes et séparées par
   l'eau, loin des bords. Chaque joueur démarre seul sur une île.
 - **Continents** : **deux continents** entourés d'océan, côte à côte dans le sens de la plus grande
@@ -148,7 +160,7 @@ bord de l'eau quand c'est possible. Ces quantités suivent la surface des terres
 | Lacs | 4 | 5 | 6 |
 | Méditerranée | 6 | 6 | 7 |
 
-La fenêtre « Nouvelle partie » relève la largeur et la hauteur si besoin.
+La fenêtre « New game » relève la largeur et la hauteur si besoin.
 
 **Départ (depuis le 03/10).** On ne choisit plus sa case de départ : comme pour les IA, elle est tirée
 au hasard pour chaque joueur, humain compris, toujours en **plaine**, la plus éloignée possible des
@@ -204,23 +216,26 @@ ennemies, dont la population totale est de toute façon affichée. Le maximum 0,
 
 **Effets sur la carte** (`scripts/view/map_effects.gd`, pictos générés par `tools/generate_icons.gd`) :
 - **Victoire.** Quand le joueur conquiert une case par la guerre, un trophée doré surgit de la case
-  avec un petit rebond, monte et s'efface en fondu, avec le titre « VICTOIRE ! ». Des rayons dorés
+  avec un petit rebond, monte et s'efface en fondu, avec le titre « VICTORY! ». Des rayons dorés
   tournent derrière lui, et des feux d'artifice multicolores éclatent autour.
 - **Défaite.** Quand une case du joueur tombe par la guerre, une épée brisée surgit en vacillant, avec
-  le titre « DÉFAITE », sur une pluie de braises et une fumée sombre.
+  le titre « DEFEAT », sur une pluie de braises et une fumée sombre.
 - **Terre conquise.** Quand ses colons fondent une nouvelle case, un drapeau planté surgit avec le
-  titre « TERRE CONQUISE », une onde à la couleur du joueur et des étincelles vertes et dorées.
+  titre « LAND CLAIMED », une onde à la couleur du joueur et des étincelles vertes et dorées.
+- **Ennemi détruit.** Quand un joueur ennemi n'a plus personne nulle part, « Player #N (couleur) has
+  been destroyed » s'affiche en grand au centre de la carte, avec le trophée, des rayons dorés et des
+  feux d'artifice, sur la clameur de victoire. Plusieurs annonces simultanées s'empilent.
 - **Ville fondée.** Quand le joueur fait passer un village en ville, l'icône de la ville, à sa couleur,
-  surgit avec le titre « VILLE FONDÉE » sur des feux d'artifice.
+  surgit avec le titre « CITY FOUNDED » sur des feux d'artifice.
 - **Retour au village.** Quand une ville du joueur redevient village, l'icône du village, à sa
-  couleur, surgit sur une pluie de braises avec le titre « RETOUR AU VILLAGE », ou « VILLE AFFAMÉE »
+  couleur, surgit sur une pluie de braises avec le titre « BACK TO VILLAGE », ou « STARVING CITY »
   si c'est la famine.
 - **Flèche « up ».** Sur chaque village plein du joueur qui peut passer en ville, une petite flèche
   dorée sautille et luit en haut à droite de la case.
 
 **Sélection.** Un clic gauche sur une case la sélectionne et l'affiche dans le zoom (ou, sur une case
 cible, y envoie les colons et l'armée de la case sélectionnée). Un **clic droit** sur la carte
-désélectionne la case : le zoom revient à « Cliquez sur une case ».
+désélectionne la case : le zoom revient à « Click on a cell ».
 - **Flash de conquête.** Toute case en vue qui change de main par la guerre s'illumine d'un éclair
   blanc, avec une onde à la couleur de son nouveau propriétaire (rouge si elle devient libre).
 - **Onde sur la frontière.** Quand le territoire du joueur s'agrandit, par colonisation ou conquête,
@@ -245,8 +260,9 @@ désélectionne la case : le zoom revient à « Cliquez sur une case ».
   frontières : une **palissade** de pieux appointés, puis un **mur de pierre** crénelé à partir de
   100 fighters en garnison (`WALL_STONE_GARRISON`). Comme les frontières, il n'y a pas de mur entre
   deux cases du joueur : les fortifications forment une grande muraille autour de sa civilisation, et
-  une case sans garnison y fait un **trou** bien visible, qui montre la zone non protégée. Seules les
-  cases du joueur sont fortifiées à l'écran (la garnison ennemie reste cachée). Réglages dans
+  une case sans garnison y fait un **trou** bien visible, qui montre la zone non protégée. Les cases
+  ennemies en vue montrent aussi leurs fortifications : on voit donc où l'ennemi a une garnison (et si
+  elle dépasse 100), sans en connaître le nombre exact. Réglages dans
   `scripts/view/hex_map.gd`.
 - **Armée prête.** Un petit soldat qui marche sur place, sur un disque clair, en haut à gauche d'une
   case du joueur, signale qu'une armée y attend, prête à partir. Les armées ennemies restent cachées
@@ -288,8 +304,15 @@ les bruitages.
 audio principal qui est rendu muet, donc le réglage tient au retour au menu et dans les parties
 suivantes.
 
+**Liste des joueurs.** Sous la barre des ressources, la colonne de droite liste tous les joueurs, un
+par ligne : couleur, nom, puis la **part du territoire** : cases possédées ÷ cases habitables de la
+carte (hors eau), en %. Tant qu'on n'a pas **rencontré** un joueur, sa part reste « ? ». On le
+rencontre dès qu'on voit une de ses cases (en arrivant à son contact), et il reste connu ensuite,
+même perdu de vue (`Player.has_met`, `World.update_contacts`). Un joueur détruit est marqué
+« destroyed ». D'autres informations s'y ajouteront avec les technologies.
+
 **Menu.** Un bouton « Menu », au bout de la barre des ressources en haut du panneau de droite, propose
-pour l'instant un seul choix, « Quitter ». Il demande « Do you really want to quit ? » (Yes / No) et le
+pour l'instant un seul choix, « Quit ». Il demande « Do you really want to quit ? » (Yes / No) et le
 jeu est en pause pendant la question ; Yes **abandonne** la partie et ouvre la fenêtre de fin (§10). La touche Échap fait la même
 chose. En fin de partie, Quitter et Échap ramènent directement au menu.
 
@@ -361,7 +384,7 @@ son niveau (voir §9).
 
 **Changements de rôle.** Les boutons « + » et « − » du zoom échangent un individu entre les workers
 et les scientists, ou entre les workers et la garnison. Dans un village, la ligne des scientists est remplacée
-par « Village : population / 256 », puis par le bouton « Progress to city » quand il est plein. Les boutons Settler et Army font de même avec
+par « Village: population / 256 », puis par le bouton « Progress to city » quand il est plein. Les boutons Settler et Army font de même avec
 les colons et l'armée (clic gauche pour remplir, clic droit pour vider). Maintenir un bouton accélère :
 un individu de plus au bout de **0,4 s** (`hold_delay`), puis 0,4/2 s, 0,4/3 s, etc., jusqu'à **500 par
 seconde** (`max_hold_rate`), deux réglages de `GameRules` : c'est la vitesse à laquelle un humain peut
@@ -508,7 +531,8 @@ Ces raccourcis ne font que déplacer des fighters déjà formés, au sein de la 
 dans l'armée ou en garnison reste progressif, en maintenant le bouton.
 
 **Armée.** Le bouton **Army** prend d'abord les fighters de la garnison, puis enrôle des workers qui
-deviennent fighters. Le clic droit renvoie un fighter de l'armée en worker. L'armée part vers une
+deviennent fighters. **Une case n'est jamais vidée** : armée et colons y laissent toujours au moins un
+habitant (worker, scientist ou fighter de la garnison). Le clic droit renvoie un fighter de l'armée en worker. L'armée part vers une
 case voisine :
 - **une case à soi en paix** : elle y **reste une armée**, prête à repartir aussitôt, ce qui rend les
   déplacements fluides. La seule limite est `max_army` pour l'armée de la case (sa place, en plus
@@ -650,7 +674,7 @@ seule case.
 
 ## 9. Intelligence artificielle
 
-Le niveau de chaque IA se choisit dans la fenêtre « Nouvelle partie ». Chaque niveau est un fichier
+Le niveau de chaque IA se choisit dans la fenêtre « New game ». Chaque niveau est un fichier
 `AIProfile` (`scripts/model/ai_profile.gd`) modifiable dans l'inspecteur : `data/ai/pacifist.tres`,
 `data/ai/normal.tres` et `data/ai/aggressive.tres`.
 
@@ -743,11 +767,12 @@ lice. Un joueur est éliminé quand il n'a plus personne, nulle part : cases, co
 et fighters engagés dans des batailles compris. Le joueur peut aussi **abandonner** (Menu > Quitter ou
 Échap, puis Yes).
 
-La fenêtre de fin annonce le résultat avec une illustration en pixel art : trophée et « Victoire ! »,
-épée brisée et « Défaite… », ou drapeau blanc et « Vous avez abandonné ». Elle montre ensuite
+La fenêtre de fin annonce le résultat avec une illustration en pixel art : trophée et « Victory! »,
+épée brisée et « Defeat… », ou drapeau blanc et « You gave up ». Elle montre ensuite
 l'évolution de la population, de la science et de la food de chaque joueur, **un graphique par
 onglet** (Population, Science, Food / cycle) pour bien voir chacun ; le réticule de survol garde le même
-instant d'un onglet à l'autre. Le bouton « Menu principal » ramène au menu.
+instant d'un onglet à l'autre. Le bouton « Back to menu » ramène au menu. Les graphiques rétrécissent si besoin pour que la
+fenêtre, bouton compris, tienne à l'écran.
 
 ---
 

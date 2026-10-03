@@ -15,10 +15,10 @@ const TILES := {
 	Terrain.Type.MARSH: preload("res://assets/tiles/marsh.png"),
 }
 const FOG_TILE := preload("res://assets/tiles/fog.png")
-## Couleur et nom de couleur de chaque joueur, par identifiant (l'ordre des joueurs fixe leur couleur) :
+## Couleur et nom de couleur (clé de texte, voir Locale) de chaque joueur, par identifiant (l'ordre des joueurs fixe leur couleur) :
 ## bordure de ses cases, courbes de fin de partie. Palette validée pour le daltonisme sur fond sombre.
 const PLAYER_COLORS := [Color("4a82f5"), Color("0fa396"), Color("d27a14"), Color("e04464")]
-const PLAYER_COLOR_NAMES := ["bleu", "vert", "orange", "rouge"]
+const PLAYER_COLOR_NAMES := ["COLOR_BLUE", "COLOR_GREEN", "COLOR_ORANGE", "COLOR_RED"]
 ## Opacité du voile à la couleur du propriétaire sur une case pleine ; elle est proportionnelle à son
 ## remplissage (habitants, hors troupe, ÷ capacité de son terrain, celle d'une ville).
 const MAX_ALPHA := 0.8

@@ -12,12 +12,12 @@ extends RefCounted
 
 enum MapType { ISLANDS, CONTINENTS, LAKES, MEDITERRANEAN }
 
-## Nom affiché de chaque type de carte.
+## Nom affiché de chaque type de carte (clé de texte, voir Locale).
 const MAP_TYPE_NAMES := {
-	MapType.ISLANDS: "Îles",
-	MapType.CONTINENTS: "Continents",
-	MapType.LAKES: "Lacs",
-	MapType.MEDITERRANEAN: "Méditerranée",
+	MapType.ISLANDS: "MAP_ISLANDS",
+	MapType.CONTINENTS: "MAP_CONTINENTS",
+	MapType.LAKES: "MAP_LAKES",
+	MapType.MEDITERRANEAN: "MAP_MEDITERRANEAN",
 }
 ## Côté minimal de la carte (largeur et hauteur) selon le type et le nombre de joueurs (2 à 4), pour que
 ## ses contraintes tiennent : îles séparées par l'eau, continents entourés d'océan, mer centrale bordée de

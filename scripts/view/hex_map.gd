@@ -33,8 +33,8 @@ const FOOD_FLOW_FULL := 512.0
 const FRONTIER_WIDTH := 2.0
 const NEON_GLOW_LAYERS := 4
 const NEON_PULSE_RATE := 0.6
-## Fortifications des cases du joueur qui ont une garnison, le long de leurs frontières (pas entre deux
-## cases à lui) : palissade de pieux, puis mur de pierre crénelé à partir de WALL_STONE_GARRISON fighters.
+## Fortifications des cases en vue qui ont une garnison (ennemies comprises), le long des frontières de
+## leur propriétaire (pas entre deux de ses cases) : palissade de pieux, puis mur de pierre crénelé à partir de WALL_STONE_GARRISON fighters.
 ## Retrait (en rayons de case) vers l'intérieur de la case, et dimensions en rayons de case.
 const WALL_STONE_GARRISON := 100
 const WALL_INSET := 0.17
@@ -162,9 +162,9 @@ func _draw() -> void:
 	for i in visible_cells.size():
 		_draw_neon_line(frontiers[i], CellBackground.PLAYER_COLORS[world.owner(visible_cells[i])], width)
 	_draw_frontier_waves(visible_cells, frontiers, width, now)
-	# Fortifications des cases du joueur qui ont une garnison : une case sans garnison fait un trou dans
-	# la muraille (la garnison ennemie reste cachée).
-	for cell in world.cells_of(viewer_id):
+	# Fortifications de chaque case en vue qui a une garnison (celles des ennemis comprises) : une case
+	# sans garnison fait un trou dans la muraille de son propriétaire.
+	for cell in visible_cells:
 		var garrison := world.population(cell).whole("fighter")
 		if garrison > 0:
 			for line in _frontier_lines(cell, _hex_radius * WALL_INSET):
@@ -224,6 +224,12 @@ func _draw() -> void:
 	_effects.draw(self, font, cell_center, _hex_radius)
 
 
+## Annonce, en grand au centre de la carte, qu'un joueur ennemi vient d'être détruit (`text`), avec
+## feux d'artifice et trophée.
+func show_destroyed(text: String) -> void:
+	_effects.add(MapEffects.Kind.DESTROYED, NO_CELL, Color.WHITE, text)
+
+
 ## « +`amount` » qui s'envole de `cell` (clic sur Boost).
 func show_boost(cell: Vector2i, amount: int) -> void:
 	_effects.add(MapEffects.Kind.BOOST, cell, Color.WHITE, "+%d" % amount)
@@ -261,7 +267,7 @@ func _on_city_founded(cell: Vector2i) -> void:
 func _on_city_lost(cell: Vector2i, by_famine: bool) -> void:
 	if world.owner(cell) == viewer_id:
 		_effects.add(MapEffects.Kind.VILLAGE, cell, CellBackground.PLAYER_COLORS[viewer_id],
-				"VILLE AFFAMÉE" if by_famine else "")
+				Locale.text("EFFECT_STARVING_CITY") if by_famine else "")
 
 
 ## Ondes sur la frontière du joueur : un front lumineux, cercle qui grandit depuis la case d'où part

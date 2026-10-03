@@ -49,10 +49,11 @@ const ACTION_COLORS := {
 ## rules.max_army).
 const ALL_TO_GARRISON := "all_to_garrison"
 const ALL_TO_ARMY := "all_to_army"
-## Bouton « Progress to city », à la place des scientists dans un village plein : couleur et libellé.
+## Bouton « Progress to city », à la place des scientists dans un village plein : couleur et libellé (clé
+## de texte, voir Locale).
 const CITY_ACTION := "city"
 const CITY_COLOR := Color(0.62, 0.42, 0.85)
-const CITY_TEXT := "Progress to city"
+const CITY_TEXT := "ZOOM_PROGRESS_CITY"
 ## Couleur de la ligne qui rappelle la capacité d'un village pas encore plein.
 const VILLAGE_HINT_COLOR := Color(0.85, 0.85, 0.85)
 ## Durée (s) de l'éclat d'un bouton d'action après un clic.
@@ -72,7 +73,7 @@ const FOOD_TEXT_COLOR := Color(1.0, 0.55, 0.5)
 ## Taille de l'hexagone par rapport à la place disponible : la marge accueille les échanges de food.
 const HEX_SCALE := 0.64
 ## Alertes affichées dans l'hexagone : famine, bataille.
-const STARVATION_TEXT := "starvation"
+const STARVATION_TEXT := "ZOOM_STARVATION"
 const STARVATION_COLOR := Color(1.0, 0.35, 0.3)
 
 @export var border_color: Color = Color(0.55, 0.55, 0.55)
@@ -124,7 +125,7 @@ func _draw() -> void:
 	_action_rects = {}
 	_shortcut_rects = {}
 	if world == null or cell == HexMap.NO_CELL:
-		_draw_centered_text("Cliquez sur une case", center, 18, hint_color)
+		_draw_centered_text(Locale.text("ZOOM_HINT"), center, 18, hint_color)
 		return
 
 	var available := size - Vector2(margin, margin) * 2.0
@@ -230,11 +231,11 @@ func _draw_village_slot(population: Population, slot: Rect2, font: Font, font_si
 	if world.can_found_city(viewer_id, cell):
 		_action_rects[CITY_ACTION] = slot
 		_draw_action_box(slot, CITY_COLOR, CITY_ACTION)
-		PopulationText.draw_icon_row(self, font, [[Icons.settlement_icon(1), CITY_TEXT, Color.WHITE, tint]],
+		PopulationText.draw_icon_row(self, font, [[Icons.settlement_icon(1), Locale.text(CITY_TEXT), Color.WHITE, tint]],
 				slot.get_center(), font_size)
 		return
-	var text := "Village : %s / %s" % [NumberFormat.compact(floori(population.residents() + 1e-6)),
-			NumberFormat.compact(floori(world.capacity(cell)))]
+	var text := Locale.text("ZOOM_VILLAGE", {"count": NumberFormat.compact(floori(population.residents() + 1e-6)),
+			"capacity": NumberFormat.compact(floori(world.capacity(cell)))})
 	PopulationText.draw_icon_row(self, font, [[Icons.settlement_icon(0), text, VILLAGE_HINT_COLOR, tint]],
 			slot.get_center(), font_size)
 
@@ -244,7 +245,7 @@ func _draw_village_slot(population: Population, slot: Rect2, font: Font, font_si
 func _draw_role_line(population: Population, role: String, icon: Texture2D, progress: float, center: Vector2,
 		font: Font, font_size: int) -> void:
 	var color: Color = PopulationText.ROLE_COLORS[role]
-	var label := PopulationText.label(role) + " : "
+	var label := PopulationText.label(role) + ": "
 	var value := NumberFormat.compact(population.whole(role))
 	var icon_size := font.get_height(font_size) * 1.2
 	var spacing := font_size * 0.4
@@ -431,7 +432,7 @@ func _draw_alerts(center: Vector2, font_size: int) -> void:
 		items.append([clash, "", Color.WHITE])
 		items.append_array(rows[1])
 	if world.owner(cell) == viewer_id and world.is_starving(cell):
-		items.append([Icons.STARVATION, STARVATION_TEXT, STARVATION_COLOR])
+		items.append([Icons.STARVATION, Locale.text(STARVATION_TEXT), STARVATION_COLOR])
 	if not items.is_empty():
 		PopulationText.draw_icon_row(self, get_theme_default_font(), items, center, font_size)
 
@@ -448,12 +449,13 @@ func _draw_actions(population: Population, top: float, full_radius: float) -> vo
 	var can_add_army := (population.can_transfer("fighter") or population.can_transfer(WORKFORCE_ROLE)) \
 			and population.army < world.rules.max_army
 	var labels := {
-		SETTLER_ACTION: [Icons.SETTLER, "Settler : %s" % NumberFormat.compact(population.settlers),
+		SETTLER_ACTION: [Icons.SETTLER, Locale.text("ZOOM_SETTLER", {"count": NumberFormat.compact(population.settlers)}),
 				commandable and (can_add_settler or population.settlers > 0)],
-		ARMY_ACTION: [Icons.SWORD, "Army : %s" % NumberFormat.compact(population.army),
+		ARMY_ACTION: [Icons.SWORD, Locale.text("ZOOM_ARMY", {"count": NumberFormat.compact(population.army)}),
 				commandable and (can_add_army or population.army > 0)],
-		BOOST_ACTION: [Icons.BOOST, "Boost", commandable and world.free_room(cell) > 0],
-		DOWNGRADE_ACTION: [Icons.settlement_icon(0), "Downgrade to village", world.can_downgrade_city(viewer_id, cell)],
+		BOOST_ACTION: [Icons.BOOST, Locale.text("ZOOM_BOOST"), commandable and world.free_room(cell) > 0],
+		DOWNGRADE_ACTION: [Icons.settlement_icon(0), Locale.text("ZOOM_DOWNGRADE"),
+				world.can_downgrade_city(viewer_id, cell)],
 	}
 	var button_size := Vector2(minf(full_radius * 1.6, size.x - margin * 2.0), ACTION_BUTTON_HEIGHT)
 	var font := get_theme_default_font()

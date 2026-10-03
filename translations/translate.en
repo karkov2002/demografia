@@ -1,0 +1,108 @@
+# Textes du jeu en anglais. Une ligne par texte : CLÉ = texte.
+# - Les lignes vides et celles qui commencent par # sont ignorées.
+# - \n dans un texte passe à la ligne.
+# - {nom} est remplacé par une valeur au moment de l'affichage (nombre, nom de joueur...) : garder ces
+#   marqueurs tels quels dans une traduction, à la place qui convient dans la phrase.
+# Pour une autre langue : copier ce fichier en translate.<code> (translate.fr, translate.de...) et
+# traduire la partie à droite du signe =, sans toucher aux clés.
+
+# --- Menu principal -------------------------------------------------------------------------------
+MENU_NEW_GAME = New game
+MENU_QUIT = Quit
+
+# --- Fenêtre « Nouvelle partie » ------------------------------------------------------------------
+NEW_GAME_TITLE = New game
+NEW_GAME_CLOSE = Close
+NEW_GAME_MAP_TYPE = Map type
+NEW_GAME_WIDTH = Map width
+NEW_GAME_HEIGHT = Map height
+NEW_GAME_PLAYER_COUNT = Number of players
+NEW_GAME_MIN_SIZE = At least {size} for this map type and number of players.
+NEW_GAME_PLAYERS = Players
+NEW_GAME_PLAYER = Player {number} ({color})
+NEW_GAME_HUMAN = Human
+NEW_GAME_HUMAN_SOON = Coming soon: another human player, online.
+NEW_GAME_START = Start game
+AI_TYPE_PACIFIST = Pacifist AI
+AI_TYPE_NORMAL = Normal AI
+AI_TYPE_AGGRESSIVE = Aggressive AI
+
+# --- Types de carte -------------------------------------------------------------------------------
+MAP_ISLANDS = Islands
+MAP_CONTINENTS = Continents
+MAP_LAKES = Lakes
+MAP_MEDITERRANEAN = Mediterranean
+
+# --- Terrains -------------------------------------------------------------------------------------
+TERRAIN_PRAIRIE = plain
+TERRAIN_MOUNTAIN = mountain
+TERRAIN_WATER = water
+TERRAIN_FOREST = forest
+TERRAIN_HILL = hill
+TERRAIN_MARSH = marsh
+
+# --- Joueurs --------------------------------------------------------------------------------------
+COLOR_BLUE = blue
+COLOR_GREEN = green
+COLOR_ORANGE = orange
+COLOR_RED = red
+AI_LEVEL_PACIFIST = pacifist
+AI_LEVEL_NORMAL = normal
+AI_LEVEL_AGGRESSIVE = aggressive
+PLAYER_YOU = You
+PLAYER_AI = AI {color} ({level})
+PLAYER_AI_SHORT = AI {color}
+PLAYER_DESTROYED = Player #{number} ({color}) has been destroyed
+
+# --- Interface de jeu -----------------------------------------------------------------------------
+HUD_MENU = Menu
+HUD_QUIT = Quit
+HUD_MUTE = Mute sound
+HUD_UNMUTE = Unmute sound
+QUIT_CONFIRM = Do you really want to quit?
+COMMON_YES = Yes
+COMMON_NO = No
+PLAYER_LIST_PLAYERS = Players
+PLAYER_LIST_TERRITORY = Territory
+PLAYER_LIST_UNKNOWN = ?
+PLAYER_LIST_DESTROYED = destroyed
+
+# --- Zoom d'une case ------------------------------------------------------------------------------
+ZOOM_HINT = Click on a cell
+ROLE_WORKER = worker
+ROLE_SCIENTIST = scientist
+ROLE_FIGHTER = garrison
+ZOOM_SETTLER = Settler: {count}
+ZOOM_ARMY = Army: {count}
+ZOOM_BOOST = Boost
+ZOOM_DOWNGRADE = Downgrade to village
+ZOOM_PROGRESS_CITY = Progress to city
+ZOOM_VILLAGE = Village: {count} / {capacity}
+ZOOM_STARVATION = starvation
+DOWNGRADE_TITLE = Become a village again?
+DOWNGRADE_MESSAGE = The city will lose {count} inhabitants to go back to {capacity},\nand its scientists will become workers again.
+DOWNGRADE_CANCEL = Cancel
+DOWNGRADE_CONFIRM = Downgrade
+
+# --- Effets sur la carte --------------------------------------------------------------------------
+EFFECT_VICTORY = VICTORY!
+EFFECT_DEFEAT = DEFEAT
+EFFECT_COLONY = LAND CLAIMED
+EFFECT_CITY = CITY FOUNDED
+EFFECT_VILLAGE = BACK TO VILLAGE
+EFFECT_STARVING_CITY = STARVING CITY
+EFFECT_DESTROYED = ENEMY DESTROYED
+
+# --- Fin de partie --------------------------------------------------------------------------------
+GAME_OVER_VICTORY = Victory!
+GAME_OVER_YOU_WIN = You win the game.
+GAME_OVER_WINNER = {player} wins the game.
+GAME_OVER_DEFEAT = Defeat…
+GAME_OVER_ELIMINATED = You have been eliminated.
+GAME_OVER_NOBODY = Nobody is left in the game.
+GAME_OVER_ABANDONED = You gave up
+GAME_OVER_ABANDONED_RESULT = The game ends here.
+GAME_OVER_MENU = Back to menu
+CHART_POPULATION = Population
+CHART_SCIENCE = Science
+CHART_FOOD = Food / cycle

@@ -4,23 +4,27 @@ extends RefCounted
 ## - VICTORY, DEFEAT, COLONY, CITY, VILLAGE : un picto et son titre surgissent de la case, montent et
 ##   s'effacent en fondu, sur des feux d'artifice (victoire, ville fondée), une pluie de braises (défaite,
 ##   ville redevenue village) ou une onde et des étincelles (terre conquise) ;
+## - DESTROYED : un joueur ennemi vient d'être détruit ; comme VICTORY, mais en grand au centre de la carte
+##   (sans case), avec le titre donné ;
 ## - FLASH : éclair blanc et onde à la couleur du nouveau propriétaire, quand une case change de main
 ##   par la guerre ;
 ## - BOOST : « +N » qui s'envole de la case.
 
-enum Kind { VICTORY, DEFEAT, COLONY, CITY, VILLAGE, FLASH, BOOST }
+enum Kind { VICTORY, DEFEAT, COLONY, CITY, VILLAGE, DESTROYED, FLASH, BOOST }
 
 ## Durée (s) de chaque effet.
 const DURATIONS := {Kind.VICTORY: 2.4, Kind.DEFEAT: 2.4, Kind.COLONY: 2.0, Kind.CITY: 2.4, Kind.VILLAGE: 2.0,
-		Kind.FLASH: 0.7, Kind.BOOST: 0.8}
-const LABELS := {Kind.VICTORY: "VICTOIRE !", Kind.DEFEAT: "DÉFAITE", Kind.COLONY: "TERRE CONQUISE",
-		Kind.CITY: "VILLE FONDÉE", Kind.VILLAGE: "RETOUR AU VILLAGE"}
+		Kind.DESTROYED: 3.5, Kind.FLASH: 0.7, Kind.BOOST: 0.8}
+## Titre de chaque effet (clé de texte, voir Locale).
+const LABELS := {Kind.VICTORY: "EFFECT_VICTORY", Kind.DEFEAT: "EFFECT_DEFEAT", Kind.COLONY: "EFFECT_COLONY",
+		Kind.CITY: "EFFECT_CITY", Kind.VILLAGE: "EFFECT_VILLAGE", Kind.DESTROYED: "EFFECT_DESTROYED"}
 const LABEL_COLORS := {
 	Kind.VICTORY: Color("ffd84a"),
 	Kind.DEFEAT: Color("ff5a4a"),
 	Kind.COLONY: Color("7cf06a"),
 	Kind.CITY: Color("d8a8ff"),
 	Kind.VILLAGE: Color("c8b89a"),
+	Kind.DESTROYED: Color("ffd84a"),
 }
 const FIREWORK_COLORS := [Color("ffd84a"), Color("ff5ad2"), Color("5ae0ff"), Color("ffffff"), Color("9cff5a")]
 const EMBER_COLORS := [Color("ff5a2a"), Color("ffa030"), Color("8a8480"), Color("c83c32")]
@@ -45,11 +49,19 @@ func is_empty() -> bool:
 func draw(canvas: CanvasItem, font: Font, center_of: Callable, radius: float) -> void:
 	var now := _now()
 	_effects = _effects.filter(func(effect: Dictionary) -> bool: return now - effect.start < DURATIONS[effect.kind])
+	var destroyed_rank := 0
 	for pass_flash in [true, false]:
 		for effect in _effects:
 			if (effect.kind == Kind.FLASH) != pass_flash:
 				continue
 			var t: float = (now - effect.start) / DURATIONS[effect.kind]
+			if effect.kind == Kind.DESTROYED:
+				# En grand, au centre de la carte ; plusieurs annonces à la fois s'empilent vers le bas.
+				var area: Vector2 = (canvas as Control).size
+				var big := minf(area.x, area.y) * 0.12
+				_draw_event(canvas, font, area / 2.0 + Vector2(0.0, destroyed_rank * big * 2.2), big, t, effect)
+				destroyed_rank += 1
+				continue
 			var center: Vector2 = center_of.call(effect.cell)
 			match effect.kind:
 				Kind.FLASH:
@@ -75,7 +87,7 @@ func _draw_event(canvas: CanvasItem, font: Font, center: Vector2, radius: float,
 	var rng := RandomNumberGenerator.new()
 	rng.seed = effect.seed
 	match kind:
-		Kind.VICTORY, Kind.CITY:
+		Kind.VICTORY, Kind.CITY, Kind.DESTROYED:
 			_draw_fireworks(canvas, center, radius, t, rng)
 		Kind.DEFEAT, Kind.VILLAGE:
 			_draw_embers(canvas, center, radius, t, rng)
@@ -91,7 +103,7 @@ func _draw_event(canvas: CanvasItem, font: Font, center: Vector2, radius: float,
 	var label_color: Color = LABEL_COLORS[kind]
 	# Halo qui pulse derrière le picto, et rayons tournants pour la victoire.
 	var pulse := 0.5 + 0.5 * sin(t * TAU * 3.0)
-	if kind == Kind.VICTORY:
+	if kind in [Kind.VICTORY, Kind.DESTROYED]:
 		for ray in 10:
 			var angle := t * 2.0 + ray * TAU / 10.0
 			var tip := position + Vector2.from_angle(angle) * radius * 1.1 * scale
@@ -101,8 +113,8 @@ func _draw_event(canvas: CanvasItem, font: Font, center: Vector2, radius: float,
 	for layer in 5:
 		canvas.draw_circle(position, radius * scale * (0.75 - layer * 0.12) * (0.9 + 0.2 * pulse),
 				Color(label_color, 0.12 * alpha))
-	var icon: Texture2D = {Kind.VICTORY: Icons.VICTORY, Kind.DEFEAT: Icons.DEFEAT, Kind.COLONY: Icons.COLONY,
-			Kind.CITY: Icons.settlement_icon(1), Kind.VILLAGE: Icons.settlement_icon(0)}[kind]
+	var icon: Texture2D = {Kind.VICTORY: Icons.VICTORY, Kind.DESTROYED: Icons.VICTORY, Kind.DEFEAT: Icons.DEFEAT,
+			Kind.COLONY: Icons.COLONY, Kind.CITY: Icons.settlement_icon(1), Kind.VILLAGE: Icons.settlement_icon(0)}[kind]
 	# Les icônes de la ville et du village, en niveaux de gris, prennent la couleur du joueur.
 	var tint: Color = effect.color if kind in [Kind.CITY, Kind.VILLAGE] else Color.WHITE
 	var wobble := sin(t * 28.0) * 0.3 * (1.0 - t) if kind == Kind.DEFEAT else 0.0
@@ -111,7 +123,7 @@ func _draw_event(canvas: CanvasItem, font: Font, center: Vector2, radius: float,
 	canvas.draw_texture_rect(icon, Rect2(-size / 2.0, size), false, Color(tint, alpha))
 	canvas.draw_set_transform_matrix(Transform2D.IDENTITY)
 	# `text`, s'il est donné, remplace le titre habituel.
-	var label: String = effect.text if effect.text != "" else LABELS[kind]
+	var label: String = effect.text if effect.text != "" else Locale.text(LABELS[kind])
 	_text(canvas, font, label, position + Vector2(0.0, size.y * 0.7 * scale), int(radius * 0.32 * scale),
 			label_color, alpha)
 

@@ -9,11 +9,12 @@ signal start_requested(setup: GameSetup)
 ## Émis à la fermeture par la croix.
 signal closed
 
-## Types proposés pour un joueur : un par niveau d'IA (identifiant = AIProfile.Level), puis humain.
+## Types proposés pour un joueur (clés de texte, voir Locale) : un par niveau d'IA (identifiant =
+## AIProfile.Level), puis humain.
 const AI_ITEMS := {
-	AIProfile.Level.PACIFIST: "IA pacifiste",
-	AIProfile.Level.NORMAL: "IA normale",
-	AIProfile.Level.AGGRESSIVE: "IA agressive",
+	AIProfile.Level.PACIFIST: "AI_TYPE_PACIFIST",
+	AIProfile.Level.NORMAL: "AI_TYPE_NORMAL",
+	AIProfile.Level.AGGRESSIVE: "AI_TYPE_AGGRESSIVE",
 }
 const HUMAN_ITEM := 100
 
@@ -30,12 +31,12 @@ func _ready() -> void:
 	content.custom_minimum_size = Vector2(440.0, 0.0)
 
 	var header := HBoxContainer.new()
-	header.add_child(_label("Nouvelle partie", 24, INK, HORIZONTAL_ALIGNMENT_LEFT))
+	header.add_child(_label(Locale.text("NEW_GAME_TITLE"), 24, INK, HORIZONTAL_ALIGNMENT_LEFT))
 	header.get_child(0).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var close := Button.new()
 	close.text = "×"
 	close.flat = true
-	close.tooltip_text = "Fermer"
+	close.tooltip_text = Locale.text("NEW_GAME_CLOSE")
 	close.add_theme_font_size_override("font_size", 26)
 	close.pressed.connect(_close)
 	header.add_child(close)
@@ -46,28 +47,28 @@ func _ready() -> void:
 	settings.add_theme_constant_override("h_separation", 16)
 	settings.add_theme_constant_override("v_separation", 8)
 	content.add_child(settings)
-	settings.add_child(_label("Type de carte", 15, INK, HORIZONTAL_ALIGNMENT_LEFT))
+	settings.add_child(_label(Locale.text("NEW_GAME_MAP_TYPE"), 15, INK, HORIZONTAL_ALIGNMENT_LEFT))
 	_map_type = OptionButton.new()
 	for type in MapGenerator.MAP_TYPE_NAMES:
-		_map_type.add_item(MapGenerator.MAP_TYPE_NAMES[type], type)
+		_map_type.add_item(Locale.text(MapGenerator.MAP_TYPE_NAMES[type]), type)
 	_map_type.select(_map_type.get_item_index(MapGenerator.MapType.CONTINENTS))
 	_map_type.item_selected.connect(func(_index: int) -> void: _update_min_size())
 	settings.add_child(_map_type)
-	_width = _add_spin(settings, "Largeur de la carte", GameSetup.MIN_SIZE, GameSetup.MAX_SIZE, 10)
-	_height = _add_spin(settings, "Hauteur de la carte", GameSetup.MIN_SIZE, GameSetup.MAX_SIZE, 10)
-	_player_count = _add_spin(settings, "Nombre de joueurs", GameSetup.MIN_PLAYERS, GameSetup.MAX_PLAYERS, 2)
+	_width = _add_spin(settings, Locale.text("NEW_GAME_WIDTH"), GameSetup.MIN_SIZE, GameSetup.MAX_SIZE, 10)
+	_height = _add_spin(settings, Locale.text("NEW_GAME_HEIGHT"), GameSetup.MIN_SIZE, GameSetup.MAX_SIZE, 10)
+	_player_count = _add_spin(settings, Locale.text("NEW_GAME_PLAYER_COUNT"), GameSetup.MIN_PLAYERS, GameSetup.MAX_PLAYERS, 2)
 	_player_count.value_changed.connect(func(_value: float) -> void:
 		_rebuild_players()
 		_update_min_size())
 	_update_min_size()
 
-	content.add_child(_label("Joueurs", 16, MUTED_INK, HORIZONTAL_ALIGNMENT_LEFT))
+	content.add_child(_label(Locale.text("NEW_GAME_PLAYERS"), 16, MUTED_INK, HORIZONTAL_ALIGNMENT_LEFT))
 	_players_box = VBoxContainer.new()
 	_players_box.add_theme_constant_override("separation", 6)
 	content.add_child(_players_box)
 	_rebuild_players()
 
-	var start := _main_button("Lancer la partie")
+	var start := _main_button(Locale.text("NEW_GAME_START"))
 	start.pressed.connect(_on_start_pressed)
 	content.add_child(start)
 
@@ -78,7 +79,7 @@ func _update_min_size() -> void:
 	var side := MapGenerator.min_side(_map_type.get_selected_id(), int(_player_count.value))
 	for spin in [_width, _height]:
 		spin.min_value = side
-		spin.tooltip_text = "Au moins %d pour ce type de carte et ce nombre de joueurs." % side
+		spin.tooltip_text = Locale.text("NEW_GAME_MIN_SIZE", {"size": side})
 
 
 func _add_spin(grid: GridContainer, text: String, minimum: int, maximum: int, value: int) -> SpinBox:
@@ -110,25 +111,26 @@ func _rebuild_players() -> void:
 		swatch.custom_minimum_size = Vector2(18.0, 18.0)
 		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.add_child(swatch)
-		var player_label := _label("Joueur %d (%s)" % [index + 1, CellBackground.PLAYER_COLOR_NAMES[index]], 15, INK,
+		var player_label := _label(Locale.text("NEW_GAME_PLAYER", {"number": index + 1,
+				"color": Locale.text(CellBackground.PLAYER_COLOR_NAMES[index])}), 15, INK,
 				HORIZONTAL_ALIGNMENT_LEFT)
 		player_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(player_label)
 		var type := OptionButton.new()
 		for level in AI_ITEMS:
-			type.add_item(AI_ITEMS[level], level)
-		type.add_item("Humain", HUMAN_ITEM)
+			type.add_item(Locale.text(AI_ITEMS[level]), level)
+		type.add_item(Locale.text("NEW_GAME_HUMAN"), HUMAN_ITEM)
 		type.custom_minimum_size = Vector2(150.0, 0.0)
 		var human_index := type.get_item_index(HUMAN_ITEM)
 		if index == 0:
 			# Le joueur local : toujours humain.
 			type.select(human_index)
 			type.disabled = true
-			type.tooltip_text = "Vous"
+			type.tooltip_text = Locale.text("PLAYER_YOU")
 		else:
 			# Pas encore d'autre joueur humain (il faudra le jeu en ligne) : IA seulement.
 			type.set_item_disabled(human_index, true)
-			type.set_item_tooltip(human_index, "Bientôt : un autre joueur humain, en ligne.")
+			type.set_item_tooltip(human_index, Locale.text("NEW_GAME_HUMAN_SOON"))
 			type.select(previous[index] if index < previous.size() else type.get_item_index(AIProfile.Level.NORMAL))
 		row.add_child(type)
 		_players_box.add_child(row)

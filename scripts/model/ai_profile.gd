@@ -12,8 +12,8 @@ const PATHS := {
 	Level.AGGRESSIVE: "res://data/ai/aggressive.tres",
 }
 
-## Nom affiché (« pacifiste », « normale », « agressive »).
-@export var label: String = "normale"
+## Nom affiché du niveau (clé de texte, voir Locale : AI_LEVEL_PACIFIST, AI_LEVEL_NORMAL…).
+@export var label: String = "AI_LEVEL_NORMAL"
 ## Handicap de croissance : multiplie l'accroissement de la population de l'IA à chaque cycle (1 = comme
 ## un humain).
 @export var growth_factor: float = 0.8

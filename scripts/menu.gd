@@ -22,10 +22,10 @@ func _ready() -> void:
 	var title := ModalPopup._label(ProjectSettings.get_setting("application/config/name"), 64, TITLE_COLOR)
 	column.add_child(title)
 	column.add_child(Control.new())  # Espace entre le titre et les boutons.
-	var new_game := _menu_button("New game")
+	var new_game := _menu_button(Locale.text("MENU_NEW_GAME"))
 	new_game.pressed.connect(_open_new_game)
 	column.add_child(new_game)
-	var quit := _menu_button("Quit")
+	var quit := _menu_button(Locale.text("MENU_QUIT"))
 	quit.pressed.connect(get_tree().quit)
 	column.add_child(quit)
 	new_game.grab_focus()

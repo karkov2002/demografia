@@ -9,9 +9,6 @@ const ROLE_COLORS := {
 	"fighter": Color(1.0, 0.35, 0.35),
 	Population.SETTLER: Color(0.95, 0.75, 0.45),
 }
-## Nom affiché de chaque rôle, quand il diffère de son identifiant : les fighters restés dans la case
-## forment sa garnison (ceux qui partent forment l'armée).
-const ROLE_LABELS := {"fighter": "garrison"}
 ## Contour sombre autour du texte, pour qu'il reste lisible sur le fond vert des cases.
 const OUTLINE_COLOR := Color(0.0, 0.0, 0.0, 0.75)
 const BAR_BACKGROUND := Color(0.0, 0.0, 0.0, 0.35)
@@ -27,7 +24,7 @@ static func draw(canvas: CanvasItem, font: Font, population: Population, center:
 	var label_width := 0.0
 	var value_width := 0.0
 	for role in population.counts:
-		labels.append(label(role) + " : ")
+		labels.append(label(role) + ": ")
 		values.append(NumberFormat.compact(population.whole(role)))
 		label_width = maxf(label_width, _width(font, labels[-1], font_size))
 		value_width = maxf(value_width, _width(font, values[-1], font_size))
@@ -47,9 +44,9 @@ static func draw(canvas: CanvasItem, font: Font, population: Population, center:
 		i += 1
 
 
-## Nom affiché de `role` (voir ROLE_LABELS).
+## Nom affiché de `role`, dans la langue du jeu (clé ROLE_WORKER, ROLE_SCIENTIST, ROLE_FIGHTER : la garnison).
 static func label(role: String) -> String:
-	return ROLE_LABELS.get(role, role)
+	return Locale.text("ROLE_" + role.to_upper())
 
 
 ## Bouton carré dans la couleur du rôle, marqué `button_sign`.

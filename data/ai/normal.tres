@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1_profile")
-label = "normale"
+label = "AI_LEVEL_NORMAL"
 boost_clicks_per_second = 2.5
 boost_burst_seconds = 4.0
 boost_pause_seconds = 8.5

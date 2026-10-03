@@ -111,7 +111,7 @@ func _draw_crosshair(font: Font, plot: Rect2, range_y: Vector2) -> void:
 	for player_id in player_colors:
 		var value: float = history.series(metric, player_id)[hover_index]
 		draw_circle(Vector2(x, _y(value, plot, range_y)), 4.0, player_colors[player_id])
-		lines.append([player_colors[player_id], "%s : %s" % [player_names[player_id], NumberFormat.compact(value)]])
+		lines.append([player_colors[player_id], "%s: %s" % [player_names[player_id], NumberFormat.compact(value)]])
 	var line_height := font.get_height(FONT_SIZE)
 	var width := 0.0
 	for line in lines:
