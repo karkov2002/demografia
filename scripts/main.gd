@@ -28,6 +28,10 @@ var _elapsed: float = 0.0
 var _game_over: bool = false
 ## Joueurs ennemis dont la destruction a déjà été annoncée.
 var _destroyed: Dictionary[int, bool] = {}
+## Un rafraîchissement de l'interface est-il déjà prévu pour la fin de l'image ? (voir _queue_refresh)
+var _refresh_queued: bool = false
+## IA qui n'ont pas encore joué depuis le dernier cycle (une par image, voir _process).
+var _ais_to_play: Array[AIController] = []
 ## Fenêtre « Do you really want to quit ? » ouverte par Échap ou Menu > Quitter, ou null.
 var _quit_confirmation: ConfirmPopup
 var _sounds := SoundFx.new()
@@ -55,9 +59,15 @@ func _ready() -> void:
 		# Le handicap de croissance d'une IA dépend de son niveau.
 		var player := _world.add_player(is_ai, profile.growth_factor if is_ai else 1.0)
 		if is_ai:
-			# Chaque IA est dirigée par une personnalité célèbre de son niveau, sans doublon.
-			var taken := _world.players.map(func(other: Player) -> String: return other.leader)
-			player.leader = Leaders.pick(level, rng, taken)
+			# Chaque IA est dirigée par une personnalité célèbre de son niveau : celle choisie dans « New game »,
+			# sinon une tirée au hasard parmi celles que personne n'a déjà ni n'a choisies.
+			var chosen: String = setup.ai_leaders[index] if index < setup.ai_leaders.size() else ""
+			if chosen != "":
+				player.leader = chosen
+			else:
+				var taken: Array = _world.players.map(func(other: Player) -> String: return other.leader)
+				taken.append_array(setup.ai_leaders)
+				player.leader = Leaders.pick(level, rng, taken)
 			_ais.append(AIController.new(_world, player.id, rng, profile))
 		elif _human == null:
 			_human = player
@@ -74,9 +84,7 @@ func _ready() -> void:
 	_preview.viewer_id = _human.id
 	_map.world = _world
 	_preview.world = _world
-	_world.changed.connect(_update_stats)
-	_world.changed.connect(_check_destroyed)
-	_world.changed.connect(_check_game_over)
+	_world.changed.connect(_queue_refresh)
 	add_child(_sounds)
 	add_child(BackgroundMusic.new())
 	_world.owner_changed.connect(_on_owner_changed)
@@ -103,6 +111,10 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Une IA en attente joue par image (voir _on_cycle), pour étaler leur réflexion sur plusieurs images.
+	if not _ais_to_play.is_empty() and _clock.running:
+		for command in _ais_to_play.pop_front().play_cycle():
+			_world.execute(command)
 	_clock.advance(delta)
 	_starvation_clock.advance(delta)
 	_preview.cycle_fraction = _clock.cycle_fraction()
@@ -112,9 +124,12 @@ func _process(delta: float) -> void:
 func _on_cycle() -> void:
 	_population_at_cycle_start = _world.total_population(_human.id)
 	_world.tick()
-	for ai in _ais:
+	# Les IA jouent chacune sur une des images suivantes (voir _process) plutôt que toutes dans celle-ci :
+	# la réflexion de plusieurs IA dans la même image ferait saccader l'affichage.
+	for ai in _ais_to_play:
 		for command in ai.play_cycle():
 			_world.execute(command)
+	_ais_to_play = _ais.duplicate()
 	_elapsed += rules.cycle_duration
 	_history.record(_world, _elapsed)
 
@@ -184,6 +199,23 @@ func _on_units_sent(to_cell: Vector2i) -> void:
 	if _world.execute(SendSettlersCommand.new(_human.id, _map.selected_cell, to_cell)):
 		_sounds.wagon(_world.rules.travel_time)
 	_world.execute(SendArmyCommand.new(_human.id, _map.selected_cell, to_cell))
+
+
+## Le monde a changé : barre des ressources, liste des joueurs, annonces de destruction et fin de partie
+## sont mis à jour une seule fois, en fin d'image, même si le monde a changé des dizaines de fois (chaque
+## commande des IA le change).
+func _queue_refresh() -> void:
+	if _refresh_queued:
+		return
+	_refresh_queued = true
+	_refresh.call_deferred()
+
+
+func _refresh() -> void:
+	_refresh_queued = false
+	_update_stats()
+	_check_destroyed()
+	_check_game_over()
 
 
 ## Totaux du joueur dans la barre d'action, chacun avec sa tendance : science produite par cycle,

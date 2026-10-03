@@ -352,6 +352,12 @@ hasard selon son niveau, sans doublon dans une partie (`scripts/model/leaders.gd
 - **pacifistes** : Gandhi, Martin Luther King Jr., Nelson Mandela, the 14th Dalai Lama, Saint Louis,
   Marcus Aurelius, Confucius.
 
+**Choisir ses adversaires.** Dans la fenêtre « New game », chaque IA a, à côté de son niveau, une liste de
+dirigeants : « Random » (silhouette « ? ») ou l'un des dirigeants de son niveau, avec son portrait.
+Changer le niveau remet la liste à « Random ». Un dirigeant déjà choisi pour une autre IA est grisé. Les
+IA laissées sur « Random » tirent leur dirigeant parmi ceux que personne n'a choisis. La fenêtre garde une
+taille fixe, quel que soit le nombre de joueurs (la place de 4 lignes est toujours réservée).
+
 Le joueur IA porte le nom de son dirigeant suivi de son niveau, par exemple « Genghis Khan
 (aggressive) », dans la liste des joueurs, la fenêtre de fin et l'annonce « … has been destroyed ».
 Chaque dirigeant a un **portrait en pixel art** (32×32, `assets/portraits/`, généré par
@@ -881,3 +887,31 @@ simulation, sans toucher aux fichiers, pour mesurer son effet.
 | `report=` | — | Écrit aussi le rapport dans ce fichier. |
 
 Une partie de 30 minutes à 4 IA prend de 30 s à 1 min de calcul.
+
+---
+
+## 13. Notes techniques : performances
+
+Mesuré le 03/10 en fin de partie (carte 20×20, 4 joueurs, environ 330 cases occupées, 15 minutes de
+jeu) : l'affichage est passé de 147 ms à environ 13 ms par image (de 7 à environ 80 images par seconde),
+et une partie simulée tourne 5 fois plus vite.
+
+- **Caches du monde** (`World._invalidate`). Les cases de chaque joueur, la population de chaque joueur,
+  le solde, les exports et les imports de food de chaque case et le nombre de cases habitables sont
+  calculés une fois, puis gardés jusqu'au prochain changement du monde (signal `changed`, dont le cache
+  est le premier abonné). Règle à respecter : **ne jamais modifier le monde sans passer par ses
+  fonctions**. Une opération qui ajoute ou retire des cases occupées et continue à lire le monde
+  appelle `_invalidate()` aussitôt (batailles, colonisation, départ). Les tableaux et dictionnaires
+  renvoyés par ces caches ne doivent pas être modifiés.
+- **Interface rafraîchie une fois par image** (`main._queue_refresh`). Barre des ressources, liste des
+  joueurs, annonces de destruction et fin de partie sont mises à jour en fin d'image, même si le monde a
+  changé des dizaines de fois (chaque commande d'une IA le change).
+- **IA étalées sur plusieurs images.** Après chaque cycle, les IA jouent chacune sur une des images
+  suivantes, au lieu de toutes dans la même image, ce qui évite une saccade par seconde.
+- **Carte en calques** (`HexMap`). Chaque case a trois calques gardés en mémoire par le moteur : terrain,
+  halo des néons, frontières et fortifications. Ils ne sont redessinés que quand l'aspect de la case
+  change : une « signature » par calque est comparée à chaque changement du monde (par exemple, la
+  muraille n'est redessinée que si sa hauteur change d'un pixel). La pulsation des néons passe par la
+  transparence du calque entier. Seule une surcouche est redessinée à chaque image : fondu du
+  brouillard, ondes, population, sélection, marqueurs, batailles, cibles, sacs de grain, chariots et
+  effets.

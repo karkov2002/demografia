@@ -38,12 +38,32 @@ var _convoys: Array[Convoy] = []
 ## Cases passées en ville (les autres cases peuplées sont des villages). Le statut reste attaché à la
 ## case quand elle change de main par la guerre ; il se perd quand elle se vide.
 var _cities: Dictionary[Vector2i, bool] = {}
+## Calculs mis en cache (voir _invalidate) : cases de chaque joueur, population de chaque joueur, solde,
+## exports et imports de food de chaque case, nombre de cases habitables.
+var _cells_by_player: Dictionary = {}
+var _population_by_player: Dictionary = {}
+var _food_balances: Dictionary[Vector2i, float] = {}
+var _food_exports: Dictionary = {}
+var _food_imports: Dictionary = {}
+var _habitable := -1
 
 
 func _init(game_rules: GameRules) -> void:
 	rules = game_rules
 	columns = rules.columns
 	rows = rules.rows
+	# Premier abonné : les caches sont vidés avant que les autres abonnés ne relisent le monde.
+	changed.connect(_invalidate)
+
+
+## Vide les caches : appelé à chaque changement du monde (signal changed), et au milieu d'une opération
+## qui ajoute ou retire des cases occupées avant de continuer à lire le monde.
+func _invalidate() -> void:
+	_cells_by_player.clear()
+	_population_by_player.clear()
+	_food_balances.clear()
+	_food_exports.clear()
+	_food_imports.clear()
 
 
 # --- Joueurs et brouillard de guerre -----------------------------------------------------------
@@ -87,12 +107,13 @@ func update_contacts() -> void:
 
 ## Cases habitables de la carte (hors eau) : la surface de référence des territoires.
 func habitable_cells() -> int:
-	var count := 0
-	for row in rows:
-		for column in columns:
-			if capacity(Vector2i(column, row)) > 0.0:
-				count += 1
-	return count
+	if _habitable < 0:
+		_habitable = 0
+		for row in rows:
+			for column in columns:
+				if capacity(Vector2i(column, row)) > 0.0:
+					_habitable += 1
+	return _habitable
 
 
 ## Part (0 à 1) des cases habitables de la carte qui appartiennent au joueur.
@@ -117,6 +138,7 @@ func terrain(cell: Vector2i) -> Terrain.Type:
 
 func set_terrain(cell: Vector2i, type: Terrain.Type) -> void:
 	_terrains[cell] = type
+	_habitable = -1
 	changed.emit()
 
 
@@ -166,17 +188,22 @@ func occupied_cells() -> Array[Vector2i]:
 	return cells
 
 
+## Cases du joueur (mises en cache : ne pas modifier le tableau renvoyé).
 func cells_of(player_id: int) -> Array[Vector2i]:
-	var cells: Array[Vector2i] = []
-	for cell in _populations:
-		if _populations[cell].owner == player_id:
-			cells.append(cell)
-	return cells
+	if not _cells_by_player.has(player_id):
+		var cells: Array[Vector2i] = []
+		for cell in _populations:
+			if _populations[cell].owner == player_id:
+				cells.append(cell)
+		_cells_by_player[player_id] = cells
+	return _cells_by_player[player_id]
 
 
 ## Population entière du joueur sur toute la carte, tous rôles, colons (en route compris), troupes et
 ## fighters engagés dans ses batailles compris.
 func total_population(player_id: int) -> int:
+	if _population_by_player.has(player_id):
+		return _population_by_player[player_id]
 	var total := 0
 	for cell in cells_of(player_id):
 		total += _populations[cell].whole_total()
@@ -185,6 +212,7 @@ func total_population(player_id: int) -> int:
 	for convoy in _convoys:
 		if convoy.player_id == player_id:
 			total += convoy.units
+	_population_by_player[player_id] = total
 	return total
 
 
@@ -423,7 +451,16 @@ func _most_costly_cell(player_id: int) -> Vector2i:
 ## consommation de chaque worker, scientist ou fighter de la garnison (rules.food_per_individual, ou
 ## rules.city_food_per_individual dans une ville), et de la ration de sa troupe (rules.army_food). Les
 ## colons ne mangent pas. La troupe est ainsi nourrie par sa case avant que le surplus ne soit exporté.
+## Mis en cache jusqu'au prochain changement du monde.
 func food_balance(cell: Vector2i) -> float:
+	if _food_balances.has(cell):
+		return _food_balances[cell]
+	var balance := _compute_food_balance(cell)
+	_food_balances[cell] = balance
+	return balance
+
+
+func _compute_food_balance(cell: Vector2i) -> float:
 	var cell_population := population(cell)
 	if cell_population == null:
 		return 0.0
@@ -453,7 +490,14 @@ func total_food_balance(player_id: int) -> float:
 ## voisines de son propriétaire qui manquent de food (solde négatif), en proportion de leur manque et
 ## sans le dépasser ; ce qui reste est perdu. Les cases en guerre, figées, n'envoient ni ne reçoivent
 ## rien. Vide sans surplus ou sans voisine dans le besoin.
+## Mis en cache jusqu'au prochain changement du monde (ne pas modifier le dictionnaire renvoyé).
 func food_exports(cell: Vector2i) -> Dictionary[Vector2i, float]:
+	if not _food_exports.has(cell):
+		_food_exports[cell] = _compute_food_exports(cell)
+	return _food_exports[cell]
+
+
+func _compute_food_exports(cell: Vector2i) -> Dictionary[Vector2i, float]:
 	var exports: Dictionary[Vector2i, float] = {}
 	var surplus := food_balance(cell)
 	if surplus <= 0.0 or is_at_war(cell):
@@ -556,13 +600,16 @@ func _kill_one(cell: Vector2i, death_order: Array) -> bool:
 
 
 ## Food reçue par `cell` de chaque voisine ({ voisine: quantité }).
+## Mis en cache jusqu'au prochain changement du monde (ne pas modifier le dictionnaire renvoyé).
 func food_imports(cell: Vector2i) -> Dictionary[Vector2i, float]:
-	var imports: Dictionary[Vector2i, float] = {}
-	for neighbor in neighbors(cell):
-		var from_neighbor := food_exports(neighbor)
-		if from_neighbor.has(cell):
-			imports[neighbor] = from_neighbor[cell]
-	return imports
+	if not _food_imports.has(cell):
+		var imports: Dictionary[Vector2i, float] = {}
+		for neighbor in neighbors(cell):
+			var from_neighbor := food_exports(neighbor)
+			if from_neighbor.has(cell):
+				imports[neighbor] = from_neighbor[cell]
+		_food_imports[cell] = imports
+	return _food_imports[cell]
 
 
 # --- Déroulement ---------------------------------------------------------------------------------
@@ -574,6 +621,8 @@ func food_imports(cell: Vector2i) -> Dictionary[Vector2i, float]:
 func tick() -> void:
 	bankrupt_cells.clear()
 	_fight_battles()
+	# Les batailles ont changé des effectifs (et peut-être des propriétaires) : les caches repartent à neuf.
+	_invalidate()
 	for current in players:
 		current.science += science_rate(current.id)
 		_collect_gold(current.id)
@@ -604,6 +653,7 @@ func start_at(player_id: int, cell: Vector2i) -> bool:
 	if not can_start_at(player_id, cell):
 		return false
 	_populations[cell] = Population.new(player_id, rules.starting_population)
+	_invalidate()
 	player(player_id).started = true
 	_reveal_around(player_id, cell)
 	update_contacts()
@@ -734,6 +784,7 @@ func _settle(convoy: Convoy) -> int:
 		var founded := not _populations.has(cell)
 		if founded:
 			_populations[cell] = Population.new(convoy.player_id)
+			_invalidate()
 		_populations[cell].counts["worker"] += settled
 		_reveal_around(convoy.player_id, cell)
 		if founded:
@@ -863,6 +914,7 @@ func _fight_battles() -> void:
 				losses[attacker] += price * loss_factor(strengths[attacker], defense)
 		if defenders != null and defenders.is_defenseless():
 			_populations.erase(cell)
+			_invalidate()
 			owner_changed.emit(cell, defenders.owner, NO_PLAYER, true)
 			defenders = null
 		for attacker in attackers:
@@ -882,6 +934,7 @@ func _fight_battles() -> void:
 		elif defenders == null and survivors.size() == 1:
 			var winner_id: int = survivors[0]
 			_populations[cell] = Population.new(winner_id, {"fighter": float(current.fighters[winner_id])})
+			_invalidate()
 			_reveal_around(winner_id, cell)
 			_battles.erase(cell)
 			owner_changed.emit(cell, NO_PLAYER, winner_id, true)

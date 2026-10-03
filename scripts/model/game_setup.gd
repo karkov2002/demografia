@@ -22,3 +22,6 @@ var map_type: int = MapGenerator.MapType.CONTINENTS
 var ai_players: Array[bool] = [false, true]
 ## Pour chaque joueur, dans le même ordre : niveau de l'IA (AIProfile.Level), ignoré pour un humain.
 var ai_levels: Array[int] = [AIProfile.Level.NORMAL, AIProfile.Level.NORMAL]
+## Pour chaque joueur, dans le même ordre : dirigeant choisi pour une IA (voir Leaders), "" pour un dirigeant
+## tiré au hasard (ou un humain).
+var ai_leaders: Array[String] = ["", ""]

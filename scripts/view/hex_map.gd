@@ -62,11 +62,12 @@ const WAVE_STEPS := 6
 
 ## Joueur dont on montre la vue (brouillard de guerre) et qu'on fait agir.
 var viewer_id: int = 0
-## Monde affiché ; la carte se redessine à chacun de ses changements.
+## Monde affiché ; les calques des cases sont mis à jour à chacun de ses changements (voir _refresh_cells).
 var world: World:
 	set(value):
 		world = value
-		world.changed.connect(queue_redraw)
+		_build_layers()
+		world.changed.connect(_mark_dirty)
 		world.owner_changed.connect(_on_owner_changed)
 		world.city_founded.connect(_on_city_founded)
 		world.city_lost.connect(_on_city_lost)
@@ -96,9 +97,15 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	# Frontières au néon qui pulsent, colons et troupes en route, batailles : animés à chaque image.
-	if world != null:
-		queue_redraw()
+	if world == null:
+		return
+	# Calques des cases mis à jour au plus une fois par image, seulement si le monde a changé.
+	if _cells_dirty:
+		_refresh_cells()
+	# Halo des néons qui pulse (transparence du calque entier), et surcouche animée.
+	var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 1000.0 * TAU * NEON_PULSE_RATE)
+	_glow_root.modulate.a = 0.45 + 0.55 * pulse
+	_overlay.queue_redraw()
 
 
 func _update_layout() -> void:
@@ -111,7 +118,8 @@ func _update_layout() -> void:
 	_hex_radius = maxf(0.0, minf(available.x / grid_units.x, available.y / grid_units.y))
 	var top_left := (size - grid_units * _hex_radius) / 2.0
 	_first_center = top_left + Vector2(sqrt(3.0) / 2.0, 1.0) * _hex_radius
-	queue_redraw()
+	# Les signatures des calques comprennent la taille des cases : tout sera redessiné.
+	_cells_dirty = true
 
 
 func cell_center(cell: Vector2i) -> Vector2:
@@ -130,55 +138,206 @@ func cell_at(point: Vector2) -> Vector2i:
 	return NO_CELL
 
 
-func _draw() -> void:
-	if world == null:
-		return
-	var now := Time.get_ticks_msec() / 1000.0
-	# Au premier dessin, ce qui est déjà connu (les mers) l'est sans fondu.
-	var first_draw := not _drawn_once
-	_drawn_once = true
+# --- Calques ---------------------------------------------------------------------------------------
+# La carte est dessinée en calques gardés en mémoire par le moteur, pour ne pas tout redessiner à chaque
+# image (voir _refresh_cells) :
+# - terrain : un calque par case (tuile, voile, champs, agglomération, bordure), redessiné quand la case
+#   change ;
+# - halo des néons : un calque par case ; la pulsation passe par la transparence du calque entier ;
+# - frontières et fortifications : un calque par case (néon, palissade ou mur), redessiné quand ses
+#   frontières ou sa garnison changent ;
+# - surcouche, redessinée à chaque image : fondu du brouillard, ondes, population, sélection,
+#   marqueurs, batailles, cibles, sacs de grain, chariots et effets.
+
+## Calque de dessin : appelle `paint` avec lui-même à chaque fois que le moteur le redessine.
+class Painter extends Node2D:
+	var paint: Callable
+
+	func _init(callback: Callable) -> void:
+		paint = callback
+
+	func _draw() -> void:
+		paint.call(self)
+
+
+## Surcouche : comme Painter, mais un Control qui a la taille de la carte (certains effets s'y centrent).
+class OverlayPainter extends Control:
+	var paint: Callable
+
+	func _init(callback: Callable) -> void:
+		paint = callback
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		paint.call(self)
+
+
+## Calque où dessinent les fonctions _draw_… en ce moment.
+var _canvas: CanvasItem
+var _terrain_root := Node2D.new()
+var _glow_root := Node2D.new()
+var _decor_root := Node2D.new()
+var _overlay: OverlayPainter
+## Calques de chaque case, et ce qu'ils montraient à leur dernier dessin (on ne les redessine que si cela
+## change).
+var _terrain_painters: Dictionary[Vector2i, Painter] = {}
+var _glow_painters: Dictionary[Vector2i, Painter] = {}
+var _decor_painters: Dictionary[Vector2i, Painter] = {}
+var _terrain_signatures: Dictionary[Vector2i, Array] = {}
+var _decor_signatures: Dictionary[Vector2i, Array] = {}
+## Le monde a changé depuis la dernière mise à jour des calques ?
+var _cells_dirty: bool = true
+## Voisines de chaque case avec le numéro du côté qui leur fait face (calculées une fois), et cases que le
+## joueur voit, relevées à chaque mise à jour (voir _refresh_cells).
+var _neighbor_sides: Dictionary[Vector2i, Array] = {}
+var _visible_set: Dictionary[Vector2i, bool] = {}
+## Relevés de la dernière mise à jour : cases en vue occupées, lignes de frontière de chacune (néon),
+## cases du joueur affamées, avec une armée prête, ou prêtes à passer en ville.
+var _visible_cells: Array[Vector2i] = []
+var _frontiers: Dictionary[Vector2i, Array] = {}
+var _starving_cells: Array[Vector2i] = []
+var _army_cells: Array[Vector2i] = []
+var _upgrade_cells: Array[Vector2i] = []
+
+
+## Crée les calques (appelé une fois, au premier monde affiché).
+func _build_layers() -> void:
+	for root in [_terrain_root, _glow_root, _decor_root]:
+		add_child(root)
+	_overlay = OverlayPainter.new(_paint_overlay)
+	add_child(_overlay)
+	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for row in world.rows:
 		for column in world.columns:
 			var cell := Vector2i(column, row)
-			CellBackground.draw(self, world, viewer_id, cell, cell_center(cell), _hex_radius)
-			if world.is_explored(viewer_id, cell) and not _explored_cells.has(cell):
+			_terrain_painters[cell] = _add_painter(_terrain_root, _paint_terrain.bind(cell))
+			_glow_painters[cell] = _add_painter(_glow_root, _paint_glow.bind(cell))
+			_decor_painters[cell] = _add_painter(_decor_root, _paint_decor.bind(cell))
+			var pairs := []
+			for neighbor in world.neighbors(cell):
+				var angle := rad_to_deg(HexUtils.neighbor_direction(cell, neighbor).angle())
+				pairs.append([neighbor, posmod(roundi(angle / 60.0), 6)])
+			_neighbor_sides[cell] = pairs
+
+
+## Calque d'une case dans `root`, dessiné par `callback(calque)`.
+func _add_painter(root: Node2D, callback: Callable) -> Painter:
+	var painter := Painter.new(callback)
+	root.add_child(painter)
+	return painter
+
+
+func _mark_dirty() -> void:
+	_cells_dirty = true
+
+
+## Met à jour les relevés de la carte et redessine les calques des cases dont l'aspect a changé.
+func _refresh_cells() -> void:
+	_cells_dirty = false
+	var now := Time.get_ticks_msec() / 1000.0
+	var first_draw := not _drawn_once
+	_drawn_once = true
+	var width := border_width * FRONTIER_WIDTH
+	_visible_cells.clear()
+	_starving_cells.clear()
+	_army_cells.clear()
+	_upgrade_cells.clear()
+	# Cases que le joueur voit : les siennes et leurs voisines.
+	_visible_set.clear()
+	for cell in world.cells_of(viewer_id):
+		_visible_set[cell] = true
+		for neighbor in world.neighbors(cell):
+			_visible_set[neighbor] = true
+	for row in world.rows:
+		for column in world.columns:
+			var cell := Vector2i(column, row)
+			var explored := world.is_explored(viewer_id, cell)
+			if explored and not _explored_cells.has(cell):
 				_explored_cells[cell] = true
 				if not first_draw:
 					_reveals[cell] = now
-			_draw_reveal(cell, now)
-			var points := HexUtils.hex_points(cell_center(cell), _hex_radius)
-			draw_polyline(HexUtils.closed(points), border_color, border_width, true)
-	# Frontières des joueurs (ennemis seulement s'ils sont en vue), au néon, dessinées après la grille
-	# pour passer au-dessus des bordures voisines. Une case ennemie en vue affiche aussi sa population
-	# totale, sans détail (sauf en guerre : voir _draw_battles).
-	var font := get_theme_default_font()
-	var font_size := maxi(10, int(_hex_radius * 0.3))
-	var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 1000.0 * TAU * NEON_PULSE_RATE)
-	var width := border_width * FRONTIER_WIDTH
-	var visible_cells: Array[Vector2i] = []
-	var frontiers: Array = []
-	for cell in world.occupied_cells():
-		if world.is_visible(viewer_id, cell):
-			visible_cells.append(cell)
-			frontiers.append(_frontier_lines(cell, width * 0.5))
-	# Tous les halos d'abord, pour qu'aucun ne passe sur le trait d'une frontière voisine.
-	for i in visible_cells.size():
-		_draw_neon_glow(frontiers[i], CellBackground.PLAYER_COLORS[world.owner(visible_cells[i])], width, pulse)
-	for i in visible_cells.size():
-		_draw_neon_line(frontiers[i], CellBackground.PLAYER_COLORS[world.owner(visible_cells[i])], width)
-	_draw_frontier_waves(visible_cells, frontiers, width, now)
-	# Fortifications de chaque case en vue qui a une garnison (celles des ennemis comprises) : une case
-	# sans garnison fait un trou dans la muraille de son propriétaire.
-	for cell in visible_cells:
-		var garrison := world.population(cell).whole("fighter")
-		if garrison > 0:
-			for line in _frontier_lines(cell, _hex_radius * WALL_INSET):
-				_draw_wall(line, garrison)
+			var cell_owner := world.owner(cell)
+			var seen := cell_owner != World.NO_PLAYER and _visible_set.has(cell)
+			var terrain_signature := [_hex_radius, _first_center, explored, seen]
+			var decor_signature := [_hex_radius, _first_center, seen]
+			if seen:
+				var cell_population := world.population(cell)
+				var residents := cell_population.residents()
+				terrain_signature.append_array([cell_owner, roundi(residents / world.terrain_capacity(cell) * 40.0),
+						Icons.settlement_tier(world, cell), ceili(6.0 * residents / world.capacity(cell) - 1e-6)])
+				# La fortification n'est redessinée que si son aspect change (pierre ou bois, hauteur au pixel près).
+				var garrison := cell_population.whole("fighter")
+				var wall := [garrison >= WALL_STONE_GARRISON, roundi(_wall_height(garrison))] if garrison > 0 else []
+				decor_signature.append_array([cell_owner, _frontier_sides(cell), wall])
+				_visible_cells.append(cell)
+				if cell_owner == viewer_id:
+					if world.is_starving(cell):
+						_starving_cells.append(cell)
+					if cell_population.army > 0:
+						_army_cells.append(cell)
+					if world.can_found_city(viewer_id, cell):
+						_upgrade_cells.append(cell)
+			if terrain_signature != _terrain_signatures.get(cell, []):
+				_terrain_signatures[cell] = terrain_signature
+				_terrain_painters[cell].queue_redraw()
+			if decor_signature != _decor_signatures.get(cell, []):
+				_decor_signatures[cell] = decor_signature
+				if seen:
+					_frontiers[cell] = _frontier_lines(cell, width * 0.5)
+				else:
+					_frontiers.erase(cell)
+				_glow_painters[cell].queue_redraw()
+				_decor_painters[cell].queue_redraw()
+
+
+## Calque de terrain de `cell` : tuile (ou brouillard), voile, champs et agglomération, puis sa bordure.
+func _paint_terrain(canvas: CanvasItem, cell: Vector2i) -> void:
+	_canvas = canvas
+	CellBackground.draw(_canvas, world, viewer_id, cell, cell_center(cell), _hex_radius)
+	var points := HexUtils.hex_points(cell_center(cell), _hex_radius)
+	_canvas.draw_polyline(HexUtils.closed(points), border_color, border_width, true)
+
+
+## Halo au néon de la frontière de `cell`, à son intensité maximale (la pulsation passe par la
+## transparence du calque entier, voir _process).
+func _paint_glow(canvas: CanvasItem, cell: Vector2i) -> void:
+	if not _frontiers.has(cell):
+		return
+	_canvas = canvas
+	_draw_neon_glow(_frontiers[cell], CellBackground.PLAYER_COLORS[world.owner(cell)], border_width * FRONTIER_WIDTH, 1.0)
+
+
+## Frontière au néon de `cell` et, si elle a une garnison, sa palissade ou son mur.
+func _paint_decor(canvas: CanvasItem, cell: Vector2i) -> void:
+	if not _frontiers.has(cell):
+		return
+	_canvas = canvas
+	_draw_neon_line(_frontiers[cell], CellBackground.PLAYER_COLORS[world.owner(cell)], border_width * FRONTIER_WIDTH)
+	var garrison := world.population(cell).whole("fighter")
+	if garrison > 0:
+		for line in _frontier_lines(cell, _hex_radius * WALL_INSET):
+			_draw_wall(line, garrison)
+
+
+## Surcouche animée, redessinée à chaque image.
+func _paint_overlay(canvas: CanvasItem) -> void:
+	if world == null:
+		return
+	_canvas = canvas
+	var now := Time.get_ticks_msec() / 1000.0
+	for cell in _reveals.keys():
+		_draw_reveal(cell, now)
+	var frontiers := []
+	for cell in _visible_cells:
+		frontiers.append(_frontiers.get(cell, []))
+	_draw_frontier_waves(_visible_cells, frontiers, border_width * FRONTIER_WIDTH, now)
 	# Population totale de chaque case en vue (celles du joueur comme les ennemies), sous son
 	# agglomération (voir CellBackground).
-	for cell in visible_cells:
-		if not world.is_at_war(cell):
-			PopulationText.draw_icon_row(self, font, [[null,
+	var font := get_theme_default_font()
+	var font_size := maxi(10, int(_hex_radius * 0.3))
+	for cell in _visible_cells:
+		if world.population(cell) != null and not world.is_at_war(cell):
+			PopulationText.draw_icon_row(_canvas, font, [[null,
 					NumberFormat.compact(world.population(cell).whole_total()), Color.WHITE]],
 					cell_center(cell) + Vector2(0.0, _hex_radius * POPULATION_TEXT_OFFSET), font_size)
 	# Sélection en retrait, pour laisser voir la couleur du joueur autour.
@@ -190,29 +349,26 @@ func _draw() -> void:
 			continue
 		var icon_size := Vector2.ONE * _hex_radius * 0.7
 		var icon_center := cell_center(cell) - Vector2(0.0, _hex_radius * 0.5)
-		draw_texture_rect(Icons.GOLD_DOWN, Rect2(icon_center - icon_size / 2.0, icon_size), false)
+		_canvas.draw_texture_rect(Icons.GOLD_DOWN, Rect2(icon_center - icon_size / 2.0, icon_size), false)
 	# Alerte en bas des cases du joueur touchées par la famine.
-	for cell in world.cells_of(viewer_id):
-		if world.is_starving(cell):
-			var icon_size := Vector2.ONE * _hex_radius * 0.7
-			var icon_center := cell_center(cell) + Vector2(0.0, _hex_radius * 0.5)
-			draw_texture_rect(Icons.STARVATION, Rect2(icon_center - icon_size / 2.0, icon_size), false)
+	for cell in _starving_cells:
+		var icon_size := Vector2.ONE * _hex_radius * 0.7
+		var icon_center := cell_center(cell) + Vector2(0.0, _hex_radius * 0.5)
+		_canvas.draw_texture_rect(Icons.STARVATION, Rect2(icon_center - icon_size / 2.0, icon_size), false)
 	# Petit soldat qui marche sur place en haut à gauche des cases du joueur où une armée est prête à
 	# partir (celles des ennemis restent cachées : on n'en voit que la population totale).
 	var march_frame := int(now * CONVOY_FPS * 0.5) % Icons.ARMY_MOVE.size()
-	for cell in world.cells_of(viewer_id):
-		if world.population(cell).army > 0:
-			var soldier_size := Vector2.ONE * _hex_radius * 0.5
-			var soldier_center := cell_center(cell) + Vector2(-_hex_radius * 0.45, -_hex_radius * 0.3)
-			draw_circle(soldier_center, soldier_size.x * 0.5, Color(1.0, 0.97, 0.88, 0.85))
-			draw_arc(soldier_center, soldier_size.x * 0.5, 0.0, TAU, 24, PopulationText.OUTLINE_COLOR,
-					maxf(1.5, _hex_radius * 0.04), true)
-			draw_texture_rect(Icons.ARMY_MOVE[march_frame], Rect2(soldier_center - soldier_size / 2.0, soldier_size),
-					false)
+	for cell in _army_cells:
+		var soldier_size := Vector2.ONE * _hex_radius * 0.5
+		var soldier_center := cell_center(cell) + Vector2(-_hex_radius * 0.45, -_hex_radius * 0.3)
+		_canvas.draw_circle(soldier_center, soldier_size.x * 0.5, Color(1.0, 0.97, 0.88, 0.85))
+		_canvas.draw_arc(soldier_center, soldier_size.x * 0.5, 0.0, TAU, 24, PopulationText.OUTLINE_COLOR,
+				maxf(1.5, _hex_radius * 0.04), true)
+		_canvas.draw_texture_rect(Icons.ARMY_MOVE[march_frame], Rect2(soldier_center - soldier_size / 2.0, soldier_size),
+				false)
 	# Flèche qui sautille sur les villages pleins du joueur, qui peuvent passer en ville.
-	for cell in world.cells_of(viewer_id):
-		if world.can_found_city(viewer_id, cell):
-			_draw_upgrade_arrow(cell_center(cell) + Vector2(_hex_radius * 0.45, -_hex_radius * 0.3), now)
+	for cell in _upgrade_cells:
+		_draw_upgrade_arrow(cell_center(cell) + Vector2(_hex_radius * 0.45, -_hex_radius * 0.3), now)
 	_draw_battles()
 	# Cibles de la case sélectionnée : chariot où ses colons peuvent partir ; pour sa troupe, flèche de
 	# déplacement vers une case du joueur et épée vers une case ennemie à attaquer (côte à côte quand
@@ -226,7 +382,7 @@ func _draw() -> void:
 		_draw_target(cell, icon, 1.0 if cell in settler_targets else 0.0)
 	_draw_food_flows(now)
 	_draw_convoys()
-	_effects.draw(self, font, cell_center, _hex_radius)
+	_effects.draw(_canvas, font, cell_center, _hex_radius)
 
 
 ## Annonce, en grand au centre de la carte, qu'un joueur ennemi vient d'être détruit (`text`), avec
@@ -300,8 +456,8 @@ func _draw_frontier_waves(cells: Array[Vector2i], frontiers: Array, width: float
 						var glow := exp(-pow((origin.distance_to((a + b) / 2.0) - front) / band, 2.0)) * strength
 						if glow < 0.03:
 							continue
-						draw_line(a, b, Color(color.lerp(Color.WHITE, 0.3), glow * 0.6), width * 4.0, true)
-						draw_line(a, b, Color(1.0, 1.0, 1.0, glow), width * 1.2, true)
+						_canvas.draw_line(a, b, Color(color.lerp(Color.WHITE, 0.3), glow * 0.6), width * 4.0, true)
+						_canvas.draw_line(a, b, Color(1.0, 1.0, 1.0, glow), width * 1.2, true)
 
 
 ## Fondu du brouillard sur `cell` si elle vient d'être découverte, avec un léger éclat blanc au milieu.
@@ -312,8 +468,8 @@ func _draw_reveal(cell: Vector2i, now: float) -> void:
 	if t >= 1.0:
 		_reveals.erase(cell)
 		return
-	CellBackground.draw_fog(self, cell_center(cell), _hex_radius, 1.0 - t)
-	draw_colored_polygon(HexUtils.hex_points(cell_center(cell), _hex_radius), Color(1.0, 1.0, 1.0, 0.25 * sin(t * PI)))
+	CellBackground.draw_fog(_canvas, cell_center(cell), _hex_radius, 1.0 - t)
+	_canvas.draw_colored_polygon(HexUtils.hex_points(cell_center(cell), _hex_radius), Color(1.0, 1.0, 1.0, 0.25 * sin(t * PI)))
 
 
 ## Batailles en vue : animation de BattleView (contour, explosions, épées sur leur halo) en haut de la
@@ -326,12 +482,12 @@ func _draw_battles() -> void:
 		if not world.is_visible(viewer_id, cell):
 			continue
 		var center := cell_center(cell)
-		BattleView.draw(self, cell, center, _hex_radius, center - Vector2(0.0, _hex_radius * 0.35), _hex_radius * 0.7,
+		BattleView.draw(_canvas, cell, center, _hex_radius, center - Vector2(0.0, _hex_radius * 0.35), _hex_radius * 0.7,
 				time)
 		var rows := BattleView.belligerents(world, viewer_id, cell)
 		for i in rows.size():
 			if not rows[i].is_empty():
-				PopulationText.draw_icon_row(self, font, rows[i], center + Vector2(0.0, _hex_radius * (0.2 + 0.28 * i)),
+				PopulationText.draw_icon_row(_canvas, font, rows[i], center + Vector2(0.0, _hex_radius * (0.2 + 0.28 * i)),
 						font_size)
 
 
@@ -352,15 +508,15 @@ func _draw_convoys() -> void:
 		# Tourné vers sa destination : retourné (largeur négative) quand il part vers la gauche.
 		if cell_center(convoy.to_cell).x < cell_center(convoy.from_cell).x:
 			rect = Rect2(rect.position + Vector2(icon_size.x, 0.0), Vector2(-icon_size.x, icon_size.y))
-		draw_texture_rect(frames[frame], rect, false, Color(1.0, 1.0, 1.0, alpha))
+		_canvas.draw_texture_rect(frames[frame], rect, false, Color(1.0, 1.0, 1.0, alpha))
 
 
 ## Icône de cible sur un disque sombre au centre de `cell`, décalée d'un demi-rayon par `shift` (-1, 0 ou 1).
 func _draw_target(cell: Vector2i, icon: Texture2D, shift: float) -> void:
 	var icon_size := Vector2.ONE * _hex_radius * (0.7 if shift != 0.0 else 1.0)
 	var icon_center := cell_center(cell) + Vector2(shift * _hex_radius * 0.4, 0.0)
-	draw_circle(icon_center, icon_size.x * 0.6, SETTLER_TARGET_BACKGROUND)
-	draw_texture_rect(icon, Rect2(icon_center - icon_size / 2.0, icon_size), false)
+	_canvas.draw_circle(icon_center, icon_size.x * 0.6, SETTLER_TARGET_BACKGROUND)
+	_canvas.draw_texture_rect(icon, Rect2(icon_center - icon_size / 2.0, icon_size), false)
 
 
 ## Côtés de `cell` qui sont des frontières de son propriétaire : ceux qui donnent sur une case qui n'est
@@ -369,10 +525,10 @@ func _draw_target(cell: Vector2i, icon: Texture2D, shift: float) -> void:
 ## direction 60° × i.
 func _frontier_sides(cell: Vector2i) -> Array[bool]:
 	var sides: Array[bool] = [true, true, true, true, true, true]
-	for neighbor in world.neighbors(cell):
-		if world.owner(neighbor) == world.owner(cell) and world.is_visible(viewer_id, neighbor):
-			var angle := rad_to_deg(HexUtils.neighbor_direction(cell, neighbor).angle())
-			sides[posmod(roundi(angle / 60.0), 6)] = false
+	var cell_owner := world.owner(cell)
+	for pair in _neighbor_sides[cell]:
+		if world.owner(pair[0]) == cell_owner and _visible_set.has(pair[0]):
+			sides[pair[1]] = false
 	return sides
 
 
@@ -423,7 +579,7 @@ func _draw_neon_glow(lines: Array[PackedVector2Array], color: Color, width: floa
 	for layer in range(NEON_GLOW_LAYERS, 0, -1):
 		var glow := Color(color, 0.06 + 0.07 * pulse)
 		for line in lines:
-			draw_polyline(line, glow, width * (1.0 + layer * 1.2) * (0.9 + 0.3 * pulse), true)
+			_canvas.draw_polyline(line, glow, width * (1.0 + layer * 1.2) * (0.9 + 0.3 * pulse), true)
 
 
 ## Trait d'une frontière au néon : la couleur du joueur, et un cœur plus clair au milieu. Des disques
@@ -431,17 +587,17 @@ func _draw_neon_glow(lines: Array[PackedVector2Array], color: Color, width: floa
 func _draw_neon_line(lines: Array[PackedVector2Array], color: Color, width: float) -> void:
 	var core := color.lerp(Color.WHITE, 0.55)
 	for line in lines:
-		draw_polyline(line, color, width, true)
+		_canvas.draw_polyline(line, color, width, true)
 		for point in line:
-			draw_circle(point, width / 2.0, color)
-		draw_polyline(line, core, width * 0.4, true)
+			_canvas.draw_circle(point, width / 2.0, color)
+		_canvas.draw_polyline(line, core, width * 0.4, true)
 		for point in line:
-			draw_circle(point, width * 0.2, core)
+			_canvas.draw_circle(point, width * 0.2, core)
 
 
 func _draw_outline(cell: Vector2i, color: Color, inset: float = 0.0, width: float = border_width * 2.0) -> void:
 	var points := HexUtils.hex_points(cell_center(cell), _hex_radius - inset)
-	draw_polyline(HexUtils.closed(points), color, width, true)
+	_canvas.draw_polyline(HexUtils.closed(points), color, width, true)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -451,7 +607,6 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 		if selected_cell != NO_CELL:
 			selected_cell = NO_CELL
-			queue_redraw()
 			cell_selected.emit(NO_CELL)
 		accept_event()
 		return
@@ -464,7 +619,6 @@ func _gui_input(event: InputEvent) -> void:
 			accept_event()
 		elif cell != NO_CELL:
 			selected_cell = cell
-			queue_redraw()
 			cell_selected.emit(cell)
 			accept_event()
 
@@ -480,10 +634,10 @@ func _draw_upgrade_arrow(center: Vector2, now: float) -> void:
 	for point in [Vector2(0.0, -0.5), Vector2(0.5, 0.05), Vector2(0.2, 0.05), Vector2(0.2, 0.5),
 			Vector2(-0.2, 0.5), Vector2(-0.2, 0.05), Vector2(-0.5, 0.05)]:
 		points.append(center + point * size)
-	draw_circle(center, size * (0.75 + 0.1 * bounce), Color(COLOR, 0.18 + 0.12 * bounce))
-	draw_colored_polygon(points, COLOR.lerp(Color.WHITE, 0.3 * bounce))
+	_canvas.draw_circle(center, size * (0.75 + 0.1 * bounce), Color(COLOR, 0.18 + 0.12 * bounce))
+	_canvas.draw_colored_polygon(points, COLOR.lerp(Color.WHITE, 0.3 * bounce))
 	points.append(points[0])
-	draw_polyline(points, PopulationText.OUTLINE_COLOR, maxf(1.5, size * 0.1), true)
+	_canvas.draw_polyline(points, PopulationText.OUTLINE_COLOR, maxf(1.5, size * 0.1), true)
 
 
 ## Food que s'envoient les cases du joueur : un sac de grain par flux, qui glisse en boucle de la case
@@ -503,7 +657,7 @@ func _draw_food_flows(now: float) -> void:
 			# Petit cahot, comme porté à dos d'homme.
 			var center := cell_center(cell).lerp(cell_center(neighbor), progress) \
 					- Vector2(0.0, absf(sin(progress * TAU * 3.0)) * icon_size.y * 0.15)
-			draw_texture_rect(Icons.GRAIN_SACK, Rect2(center - icon_size / 2.0, icon_size), false,
+			_canvas.draw_texture_rect(Icons.GRAIN_SACK, Rect2(center - icon_size / 2.0, icon_size), false,
 					Color(1.0, 1.0, 1.0, alpha))
 
 
@@ -513,16 +667,11 @@ func _draw_food_flows(now: float) -> void:
 func _draw_wall(line: PackedVector2Array, garrison: int) -> void:
 	var outline_width := maxf(1.0, _hex_radius * 0.02)
 	var stone := garrison >= WALL_STONE_GARRISON
-	var height := 0.0
+	var height := _wall_height(garrison)
 	if stone:
-		var rise := clampf(log(float(garrison) / WALL_STONE_GARRISON) / log(float(WALL_FULL_STONE) / WALL_STONE_GARRISON),
-				0.0, 1.0)
-		height = _hex_radius * lerpf(STONE_HEIGHT[0], STONE_HEIGHT[1], rise)
 		_draw_stone_face(line, height, outline_width)
 	else:
-		var rise := clampf(log(float(garrison)) / log(float(WALL_STONE_GARRISON)), 0.0, 1.0)
-		height = _hex_radius * lerpf(STAKE_HEIGHT[0], STAKE_HEIGHT[1], rise)
-		draw_polyline(line, WALL_OUTLINE, outline_width * 2.5, true)
+		_canvas.draw_polyline(line, WALL_OUTLINE, outline_width * 2.5, true)
 	var spacing := _hex_radius * STAKE_SPACING
 	for i in line.size() - 1:
 		var a := line[i]
@@ -536,6 +685,15 @@ func _draw_wall(line: PackedVector2Array, garrison: int) -> void:
 				_draw_stake(spot, height)
 
 
+## Hauteur (px) de la fortification d'une garnison de `garrison` fighters (voir WALL_STONE_GARRISON).
+func _wall_height(garrison: int) -> float:
+	if garrison >= WALL_STONE_GARRISON:
+		var stone_rise := log(float(garrison) / WALL_STONE_GARRISON) / log(float(WALL_FULL_STONE) / WALL_STONE_GARRISON)
+		return _hex_radius * lerpf(STONE_HEIGHT[0], STONE_HEIGHT[1], clampf(stone_rise, 0.0, 1.0))
+	var rise := clampf(log(float(maxi(garrison, 1))) / log(float(WALL_STONE_GARRISON)), 0.0, 1.0)
+	return _hex_radius * lerpf(STAKE_HEIGHT[0], STAKE_HEIGHT[1], rise)
+
+
 ## Mur de pierre de `height` pixels dressé sur `line` : face sombre striée d'assises de pierre, puis le
 ## chemin de ronde clair à son sommet.
 func _draw_stone_face(line: PackedVector2Array, height: float, outline_width: float) -> void:
@@ -545,20 +703,20 @@ func _draw_stone_face(line: PackedVector2Array, height: float, outline_width: fl
 		var a := line[i]
 		var b := line[i + 1]
 		var face := PackedVector2Array([a, b, b + lift, a + lift])
-		draw_colored_polygon(face, STONE_COLORS[0])
+		_canvas.draw_colored_polygon(face, STONE_COLORS[0])
 		# Assises : une ligne de joint toutes les `course` pixels de hauteur.
 		var rows := floori(height / course)
 		for row in range(1, rows + 1):
 			var up := Vector2(0.0, -row * course)
-			draw_line(a + up, b + up, WALL_OUTLINE.lerp(STONE_COLORS[0], 0.5), maxf(1.0, outline_width * 0.6), true)
+			_canvas.draw_line(a + up, b + up, WALL_OUTLINE.lerp(STONE_COLORS[0], 0.5), maxf(1.0, outline_width * 0.6), true)
 		face.append(face[0])
-		draw_polyline(face, WALL_OUTLINE, outline_width, true)
+		_canvas.draw_polyline(face, WALL_OUTLINE, outline_width, true)
 	var top := PackedVector2Array()
 	for point in line:
 		top.append(point + lift)
 	var walk := _hex_radius * STONE_WIDTH * 0.6
-	draw_polyline(top, WALL_OUTLINE, walk + outline_width * 2.0, true)
-	draw_polyline(top, STONE_COLORS[1], walk, true)
+	_canvas.draw_polyline(top, WALL_OUTLINE, walk + outline_width * 2.0, true)
+	_canvas.draw_polyline(top, STONE_COLORS[1], walk, true)
 
 
 ## Pieu de palissade de `h` pixels planté en `foot` : corps de bois éclairé à gauche, pointe en haut,
@@ -567,18 +725,18 @@ func _draw_stake(foot: Vector2, h: float) -> void:
 	var w := _hex_radius * STAKE_SPACING * 0.7
 	var body := PackedVector2Array([foot + Vector2(-w / 2.0, 0.0), foot + Vector2(w / 2.0, 0.0),
 			foot + Vector2(w / 2.0, -h), foot + Vector2(0.0, -h - w * 0.7), foot + Vector2(-w / 2.0, -h)])
-	draw_colored_polygon(body, WOOD_COLORS[1])
-	draw_colored_polygon(PackedVector2Array([foot + Vector2(-w / 2.0, 0.0), foot + Vector2(-w / 2.0 + w * 0.35, 0.0),
+	_canvas.draw_colored_polygon(body, WOOD_COLORS[1])
+	_canvas.draw_colored_polygon(PackedVector2Array([foot + Vector2(-w / 2.0, 0.0), foot + Vector2(-w / 2.0 + w * 0.35, 0.0),
 			foot + Vector2(-w / 2.0 + w * 0.35, -h - w * 0.45), foot + Vector2(-w / 2.0, -h)]), WOOD_COLORS[2])
 	body.append(body[0])
-	draw_polyline(body, WALL_OUTLINE, maxf(1.0, _hex_radius * 0.015), true)
+	_canvas.draw_polyline(body, WALL_OUTLINE, maxf(1.0, _hex_radius * 0.015), true)
 
 
 ## Merlon posé sur le chemin de ronde en `spot` (le sommet du mur) : bloc éclairé à gauche, cerné de sombre.
 func _draw_merlon(spot: Vector2) -> void:
 	var s := _hex_radius * STONE_WIDTH * 0.7
 	var block := Rect2(spot + Vector2(-s / 2.0, -s), Vector2(s, s))
-	draw_rect(block, STONE_COLORS[1])
-	draw_rect(Rect2(block.position, Vector2(s * 0.35, s)), STONE_COLORS[2])
-	draw_rect(Rect2(block.position + Vector2(0.0, s * 0.75), Vector2(s, s * 0.25)), STONE_COLORS[0])
-	draw_rect(block, WALL_OUTLINE, false, maxf(1.0, _hex_radius * 0.015))
+	_canvas.draw_rect(block, STONE_COLORS[1])
+	_canvas.draw_rect(Rect2(block.position, Vector2(s * 0.35, s)), STONE_COLORS[2])
+	_canvas.draw_rect(Rect2(block.position + Vector2(0.0, s * 0.75), Vector2(s, s * 0.25)), STONE_COLORS[0])
+	_canvas.draw_rect(block, WALL_OUTLINE, false, maxf(1.0, _hex_radius * 0.015))
